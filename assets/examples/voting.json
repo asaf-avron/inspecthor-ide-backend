@@ -1,0 +1,7 @@
+{
+    "name": "Voting System (Boolean State)",
+    "description": "Demonstrates how to handle boolean flags (has_voted) to prevent double-actions.",
+    "contract": "trait VotingInterface {\n    // State: map<string, bool> has_voted\n    method CastVote(voter_id: string) returns (success: bool)\n        requires !has_voted[voter_id]\n        ensures success ==> has_voted[voter_id] == true\n}",
+    "python": "def cast_vote(self, voter_id: str) -> bool:\n    if not self.has_voted.get(voter_id, False):\n        self.has_voted[voter_id] = True\n        return True\n    return False",
+    "dafny_impl": "class VotingImplementation extends VotingInterface {\n    method CastVote(voter_id: string) returns (success: bool)\n        requires !has_voted[voter_id]\n        ensures success ==> has_voted[voter_id] == true\n    {\n        if voter_id !in has_voted || !has_voted[voter_id] {\n            has_voted := has_voted[voter_id := true];\n            success := true;\n        } else {\n            success := false;\n        }\n    }\n}"
+  }
