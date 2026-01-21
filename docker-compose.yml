@@ -1,0 +1,14 @@
+# Guardian Gateway - Docker Compose
+# Run with: docker-compose up --build
+
+services:
+  guardian-gateway:
+    build: .
+    container_name: guardian-gateway
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    restart: unless-stopped
