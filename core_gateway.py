@@ -16,9 +16,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 except ImportError:
     genai = None
+    types = None
 
 from dotenv import load_dotenv
 
@@ -167,8 +169,8 @@ class CodeVerifier:
     Postconditions: Returns a VerificationResult with verification status.
     """
     
-    DEFAULT_MODEL = "gemini-2.0-flash"
-    FALLBACK_MODEL = "gemini-1.5-flash"
+    DEFAULT_MODEL = "models/gemini-2.0-flash-exp"
+    FALLBACK_MODEL = "models/gemini-2.5-flash"
     
     def __init__(self, api_key: Optional[str] = None):
         """
@@ -179,10 +181,10 @@ class CodeVerifier:
                      GEMINI_API_KEY environment variable.
         """
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        self._model = None
+        self._model = self.DEFAULT_MODEL
         
         if genai is None:
-            self._init_error = "google-generativeai package not installed. Run: pip install google-generativeai"
+            self._init_error = "google-genai package not installed. Run: pip install google-genai"
         elif not self.api_key:
             self._init_error = "GEMINI_API_KEY not found. Set it in .env file or environment."
         else:
@@ -192,19 +194,14 @@ class CodeVerifier:
     def _configure_genai(self) -> None:
         """Configure the Gemini API with the provided key."""
         if genai and self.api_key:
-            genai.configure(api_key=self.api_key)
             try:
-                self._model = genai.GenerativeModel(self.DEFAULT_MODEL)
-            except Exception:
-                # Fallback to older model if 2.0-flash not available
-                try:
-                    self._model = genai.GenerativeModel(self.FALLBACK_MODEL)
-                except Exception as e:
-                    self._init_error = f"Failed to initialize model: {e}"
+                self._client = genai.Client(api_key=self.api_key)
+            except Exception as e:
+                self._init_error = f"Failed to initialize client: {e}"
     
     def is_configured(self) -> bool:
         """Check if the verifier is properly configured."""
-        return self._init_error is None and self._model is not None
+        return self._init_error is None and hasattr(self, '_client')
     
     def get_configuration_error(self) -> Optional[str]:
         """Get the configuration error message if any."""
@@ -318,7 +315,10 @@ OUTPUT RULES:
 """
         
         try:
-            response = self._model.generate_content(prompt)
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=prompt
+            )
             raw_text = response.text
             
             # Clean up the response - remove markdown code blocks if present
