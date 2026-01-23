@@ -1,16 +1,23 @@
 # Guardian Gateway - Streamlit Frontend
-# The Lens + Auditor: Visualization dashboard for formal proofs
+# 4-Stage Workflow: Triage -> Structure -> Audit -> Approve
 # Imperative Shell: UI layer that uses the pure Functional Core
 
 import streamlit as st
+import pandas as pd
 from core_parser import (
     DafnyParser, 
     parse_dafny_source, 
     humanize_clause, 
     get_clause_icon
 )
-from core_auditor import SpecAuditor, GapReport
+from core_auditor import SpecAuditor, GapReport, TraceabilityEntry
 from core_gateway import CodeVerifier, VerificationResult
+from core_workflow import (
+    DocType, RigorLevel, WorkflowStatus,
+    run_triage, run_structuring,
+    assess_risk, get_risk_status,
+    RISK_THRESHOLDS
+)
 
 # Page configuration
 st.set_page_config(
@@ -19,12 +26,496 @@ st.set_page_config(
     layout="wide"
 )
 
+
+# =============================================================================
+# Session State Initialization
+# =============================================================================
+
+def init_workflow_state():
+    """Initialize all workflow-related session state variables."""
+    if "workflow_status" not in st.session_state:
+        st.session_state.workflow_status = WorkflowStatus.DRAFT
+    if "current_stage" not in st.session_state:
+        st.session_state.current_stage = 1
+    if "raw_input" not in st.session_state:
+        st.session_state.raw_input = ""
+    if "doc_type" not in st.session_state:
+        st.session_state.doc_type = None
+    if "structured_spec" not in st.session_state:
+        st.session_state.structured_spec = ""
+    if "audit_report" not in st.session_state:
+        st.session_state.audit_report = None
+    if "traceability_data" not in st.session_state:
+        st.session_state.traceability_data = []
+    if "risk_score" not in st.session_state:
+        st.session_state.risk_score = 0
+    if "rigor_level" not in st.session_state:
+        st.session_state.rigor_level = RigorLevel.STANDARD
+
+
+def reset_workflow():
+    """Reset the workflow to initial state."""
+    st.session_state.workflow_status = WorkflowStatus.DRAFT
+    st.session_state.current_stage = 1
+    st.session_state.raw_input = ""
+    st.session_state.doc_type = None
+    st.session_state.structured_spec = ""
+    st.session_state.audit_report = None
+    st.session_state.traceability_data = []
+    st.session_state.risk_score = 0
+
+
+# Initialize state
+init_workflow_state()
+
+
+# =============================================================================
 # Header
+# =============================================================================
+
 st.title("🛡️ Guardian Gateway")
 st.caption("Autonomous Infrastructure for Mathematical AI Verification")
-
 st.divider()
 
+
+# =============================================================================
+# Stage Progress Indicator
+# =============================================================================
+
+def render_stage_progress():
+    """Render the workflow stage progress indicator."""
+    stages = ["📝 Triage", "📋 Structure", "🔍 Audit", "✅ Approve"]
+    current = st.session_state.current_stage
+    
+    cols = st.columns(4)
+    for i, (col, stage_name) in enumerate(zip(cols, stages), 1):
+        with col:
+            if i < current:
+                st.success(f"~~{stage_name}~~")
+            elif i == current:
+                st.info(f"**{stage_name}**")
+            else:
+                st.markdown(f"*{stage_name}*")
+
+
+# =============================================================================
+# Stage 1: Triage
+# =============================================================================
+
+def render_stage_1_triage():
+    """Render Stage 1: Input and Classification."""
+    st.markdown("### Stage 1: Triage")
+    st.markdown("Paste your specification text below. We'll classify it to ensure it's a valid functional spec.")
+    
+    # Sample spec for demo
+    sample_spec = """Rewards System Specification
+
+Users earn points by completing tasks. Each task completion awards 10 points.
+Premium users receive a 2x multiplier on all point earnings.
+
+Users can redeem points for rewards from the reward catalog.
+Each reward has a point cost. When a user redeems a reward, their points are deducted.
+
+Monthly leaderboards track top point earners. The top 3 users receive bonus rewards.
+"""
+    
+    # Text area for input
+    spec_text = st.text_area(
+        "Specification Input",
+        value=st.session_state.raw_input if st.session_state.raw_input else sample_spec,
+        height=300,
+        help="Paste your English specification here",
+        key="triage_input"
+    )
+    
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        analyze_clicked = st.button("🔍 Analyze", type="primary", key="analyze_btn")
+    
+    if analyze_clicked and spec_text:
+        st.session_state.raw_input = spec_text
+        
+        with st.spinner("Classifying document..."):
+            result = run_triage(spec_text)
+        
+        if result.error:
+            st.error(f"Classification Error: {result.error}")
+            return
+        
+        st.session_state.doc_type = result.doc_type
+        
+        if result.doc_type == DocType.JUNK:
+            st.error("❌ **Invalid Input**: Please provide a functional requirement or specification document.")
+            st.info(f"Classification confidence: {result.confidence:.0%}")
+        elif result.doc_type == DocType.CODE:
+            st.warning("🔄 **Code Detected**: This appears to be source code. Redirecting to Gateway tab...")
+            st.info("Please use the **Gateway** tab to verify code against contracts.")
+        elif result.doc_type == DocType.SPEC:
+            st.success(f"✅ **Valid Specification Detected** (confidence: {result.confidence:.0%})")
+            st.session_state.current_stage = 2
+            st.session_state.workflow_status = WorkflowStatus.ANALYZING
+            st.rerun()
+
+
+# =============================================================================
+# Stage 2: Structure
+# =============================================================================
+
+def render_stage_2_structure():
+    """Render Stage 2: Normalization to Standard Template."""
+    st.markdown("### Stage 2: Structure")
+    st.markdown("Normalizing your specification to the Guardian Standard Template...")
+    
+    # Check if we need to run structuring
+    if not st.session_state.structured_spec:
+        with st.spinner("Standardizing specification..."):
+            result = run_structuring(st.session_state.raw_input)
+        
+        if result.error:
+            st.error(f"Structuring Error: {result.error}")
+            if st.button("⬅️ Back to Triage"):
+                st.session_state.current_stage = 1
+                st.rerun()
+            return
+        
+        st.session_state.structured_spec = result.structured_spec
+        
+        if not result.validation_passed:
+            st.warning("⚠️ **Normalization Warning**: The structured spec may be missing required sections. Please review and edit.")
+    
+    # Display the structured spec (editable)
+    st.markdown("#### Structured Specification")
+    st.caption("Review and edit the normalized specification below:")
+    
+    edited_spec = st.text_area(
+        "Structured Spec",
+        value=st.session_state.structured_spec,
+        height=400,
+        key="structure_editor",
+        label_visibility="collapsed"
+    )
+    
+    # Update if edited
+    if edited_spec != st.session_state.structured_spec:
+        st.session_state.structured_spec = edited_spec
+    
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        if st.button("⬅️ Back", key="back_to_triage"):
+            st.session_state.current_stage = 1
+            st.session_state.structured_spec = ""
+            st.rerun()
+    with col2:
+        if st.button("🔍 Continue to Audit", type="primary", key="continue_to_audit"):
+            st.session_state.current_stage = 3
+            st.rerun()
+
+
+# =============================================================================
+# Stage 3: Audit & Traceability
+# =============================================================================
+
+def render_stage_3_audit():
+    """Render Stage 3: Audit with Traceability Matrix."""
+    st.markdown("### Stage 3: Audit & Traceability")
+    
+    # Controls row
+    col_rigor, col_btn, col_spacer = st.columns([2, 1, 2])
+    
+    with col_rigor:
+        rigor_options = {
+            "🟢 Sanity (Lenient)": RigorLevel.SANITY,
+            "🟡 Standard (Default)": RigorLevel.STANDARD,
+            "🔴 Paranoid (Strict)": RigorLevel.PARANOID
+        }
+        selected_rigor = st.selectbox(
+            "Rigor Level",
+            options=list(rigor_options.keys()),
+            index=1,  # Default to Standard
+            help="Controls how strict the risk threshold is for approval"
+        )
+        st.session_state.rigor_level = rigor_options[selected_rigor]
+    
+    with col_btn:
+        st.markdown("<br>", unsafe_allow_html=True)  # Spacing
+        run_audit_clicked = st.button("🔍 Run Audit", type="primary", key="run_audit_btn")
+    
+    # Run audit if clicked
+    if run_audit_clicked:
+        auditor = SpecAuditor()
+        
+        if not auditor.is_configured():
+            st.error(f"⚠️ {auditor.get_configuration_error()}")
+            st.info("💡 Create a `.env` file with your `GEMINI_API_KEY=your_key_here`")
+            return
+        
+        with st.spinner("Running compliance audit with traceability extraction..."):
+            result = auditor.audit_spec(st.session_state.structured_spec)
+        
+        if result.error:
+            st.error(f"Audit Error: {result.error}")
+            return
+        
+        st.session_state.audit_report = result
+        st.session_state.traceability_data = result.traceability_matrix
+        
+        # Calculate risk
+        critical_count = sum(1 for g in result.gaps if g.severity == "critical")
+        warning_count = sum(1 for g in result.gaps if g.severity == "warning")
+        st.session_state.risk_score = (10 * critical_count) + warning_count
+        
+        st.session_state.workflow_status = WorkflowStatus.READY
+    
+    # Display results if audit has been run
+    if st.session_state.audit_report:
+        _display_audit_results_with_traceability(st.session_state.audit_report)
+        
+        st.divider()
+        
+        # Navigation buttons
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("⬅️ Back to Structure", key="back_to_structure"):
+                st.session_state.current_stage = 2
+                st.session_state.audit_report = None
+                st.rerun()
+        with col2:
+            if st.button("✅ Continue to Approval", type="primary", key="continue_to_approval"):
+                st.session_state.current_stage = 4
+                st.rerun()
+    else:
+        st.info("👆 Click 'Run Audit' to analyze the specification for logic gaps and generate the traceability matrix.")
+        
+        # Show structured spec preview
+        with st.expander("View Structured Specification"):
+            st.code(st.session_state.structured_spec, language="markdown")
+
+
+def _display_audit_results_with_traceability(report: GapReport):
+    """Display audit results with traceability matrix."""
+    
+    # Two-column layout: Tagged Spec | Dafny Skeleton
+    col_spec, col_dafny = st.columns([1, 1])
+    
+    with col_spec:
+        st.markdown("#### 📝 Tagged Specification")
+        if report.tagged_spec:
+            st.markdown(report.tagged_spec)
+        else:
+            st.info("No tagged specification generated.")
+    
+    with col_dafny:
+        st.markdown("#### 📄 Dafny Skeleton")
+        if report.dafny_skeleton:
+            st.code(report.dafny_skeleton, language="csharp")
+        else:
+            st.info("No Dafny skeleton generated.")
+    
+    st.divider()
+    
+    # Gaps and Ambiguities
+    col_gaps, col_ambig = st.columns([1, 1])
+    
+    with col_gaps:
+        st.markdown("#### 🚨 Logic Gaps")
+        if report.gaps:
+            for gap in report.gaps:
+                if gap.severity == "critical":
+                    st.error(f"**CRITICAL**: {gap.description}")
+                else:
+                    st.warning(f"**Warning**: {gap.description}")
+        else:
+            st.success("No logic gaps detected!")
+    
+    with col_ambig:
+        st.markdown("#### 🤔 Ambiguities")
+        if report.ambiguities:
+            for amb in report.ambiguities:
+                st.info(f"• {amb}")
+        else:
+            st.success("No ambiguities detected!")
+    
+    st.divider()
+    
+    # Traceability Matrix
+    st.markdown("#### 🔗 Traceability Matrix")
+    
+    if report.traceability_matrix:
+        # Convert to DataFrame for display
+        matrix_data = []
+        for entry in report.traceability_matrix:
+            # Status badge
+            status_badges = {
+                "Pending": "🟡 Pending",
+                "Implemented": "🔵 Implemented",
+                "Verified": "🟢 Verified",
+                "Missing": "🔴 Missing",
+                "Obsolete": "⚫ Obsolete"
+            }
+            status_display = status_badges.get(entry.status, f"⚪ {entry.status}")
+            
+            matrix_data.append({
+                "ID": entry.id,
+                "Requirement": entry.source_text[:80] + "..." if len(entry.source_text) > 80 else entry.source_text,
+                "Status": status_display,
+                "Logic Link": entry.code_line if entry.code_line else "-"
+            })
+        
+        df = pd.DataFrame(matrix_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No traceability entries found. The auditor may not have identified atomic requirements.")
+    
+    # Summary metrics
+    st.divider()
+    col1, col2, col3, col4 = st.columns(4)
+    critical_count = sum(1 for g in report.gaps if g.severity == "critical")
+    warning_count = sum(1 for g in report.gaps if g.severity == "warning")
+    
+    col1.metric("Critical Gaps", critical_count)
+    col2.metric("Warnings", warning_count)
+    col3.metric("Ambiguities", len(report.ambiguities))
+    col4.metric("Requirements Traced", len(report.traceability_matrix))
+
+
+# =============================================================================
+# Stage 4: Approval
+# =============================================================================
+
+def render_stage_4_approval():
+    """Render Stage 4: Risk Assessment and Finalization."""
+    st.markdown("### Stage 4: Approval")
+    
+    if not st.session_state.audit_report:
+        st.warning("Please complete the audit stage first.")
+        if st.button("⬅️ Back to Audit"):
+            st.session_state.current_stage = 3
+            st.rerun()
+        return
+    
+    report = st.session_state.audit_report
+    
+    # Calculate risk assessment
+    critical_count = sum(1 for g in report.gaps if g.severity == "critical")
+    warning_count = sum(1 for g in report.gaps if g.severity == "warning")
+    
+    assessment = assess_risk(critical_count, warning_count, st.session_state.rigor_level)
+    status_emoji, status_text = get_risk_status(assessment)
+    
+    # Risk Score Display
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            "Risk Score",
+            assessment.score,
+            delta=None
+        )
+    
+    with col2:
+        st.metric(
+            "Threshold",
+            assessment.threshold,
+            delta=f"{st.session_state.rigor_level.value.title()} Mode"
+        )
+    
+    with col3:
+        if assessment.is_acceptable:
+            st.success(f"## {status_emoji} {status_text}")
+        else:
+            st.warning(f"## {status_emoji} {status_text}")
+    
+    st.divider()
+    
+    # Summary of findings
+    st.markdown("#### 📊 Audit Summary")
+    
+    col_summary1, col_summary2 = st.columns(2)
+    
+    with col_summary1:
+        st.markdown(f"""
+        - **Critical Gaps:** {critical_count}
+        - **Warnings:** {warning_count}
+        - **Ambiguities:** {len(report.ambiguities)}
+        - **Requirements Traced:** {len(report.traceability_matrix)}
+        """)
+    
+    with col_summary2:
+        if assessment.is_acceptable:
+            st.success("✅ Specification meets the selected rigor threshold and is ready for finalization.")
+        else:
+            st.warning("⚠️ Specification exceeds the risk threshold. Consider addressing critical gaps before finalizing.")
+    
+    st.divider()
+    
+    # Finalization controls
+    is_finalized = st.session_state.workflow_status == WorkflowStatus.FINALIZED
+    
+    if is_finalized:
+        st.success("🔒 **Specification Finalized**")
+        st.info("The specification is now locked and ready for Dafny code generation.")
+        
+        # Show finalized spec (read-only)
+        with st.expander("View Finalized Specification", expanded=False):
+            st.code(st.session_state.structured_spec, language="markdown")
+        
+        # Show Dafny skeleton
+        with st.expander("View Dafny Skeleton", expanded=True):
+            st.code(report.dafny_skeleton, language="csharp")
+        
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("🔄 Start New Workflow", key="restart_workflow"):
+                reset_workflow()
+                st.rerun()
+        with col2:
+            st.download_button(
+                "📥 Download Dafny Skeleton",
+                data=report.dafny_skeleton,
+                file_name="specification.dfy",
+                mime="text/plain"
+            )
+    else:
+        col1, col2, col3 = st.columns([1, 1, 2])
+        
+        with col1:
+            if st.button("⬅️ Back to Audit", key="back_to_audit"):
+                st.session_state.current_stage = 3
+                st.rerun()
+        
+        with col2:
+            # Finalize button - enabled even if not acceptable (with warning)
+            finalize_clicked = st.button(
+                "🔒 Finalize Spec",
+                type="primary",
+                key="finalize_btn"
+            )
+            
+            if finalize_clicked:
+                if not assessment.is_acceptable:
+                    st.session_state.show_finalize_warning = True
+                else:
+                    st.session_state.workflow_status = WorkflowStatus.FINALIZED
+                    st.rerun()
+        
+        # Confirmation dialog for risky finalization
+        if st.session_state.get("show_finalize_warning", False):
+            st.warning("⚠️ The specification has unresolved issues. Are you sure you want to finalize?")
+            col_confirm1, col_confirm2 = st.columns([1, 1])
+            with col_confirm1:
+                if st.button("Yes, Finalize Anyway", key="confirm_finalize"):
+                    st.session_state.workflow_status = WorkflowStatus.FINALIZED
+                    st.session_state.show_finalize_warning = False
+                    st.rerun()
+            with col_confirm2:
+                if st.button("Cancel", key="cancel_finalize"):
+                    st.session_state.show_finalize_warning = False
+                    st.rerun()
+
+
+# =============================================================================
+# Legacy Tabs (Lens & Gateway)
+# =============================================================================
 
 def render_lens_tab():
     """
@@ -129,131 +620,6 @@ def render_lens_tab():
     
     else:
         st.info("👆 Upload a Dafny file or enable the demo to get started.")
-
-
-def render_auditor_tab():
-    """
-    Render the Spec Auditor tab.
-    Uses LLM to analyze specifications for logic gaps and generate Dafny skeletons.
-    """
-    st.markdown("""
-    The **Spec Auditor** analyzes English specifications using AI to find logic gaps,
-    ambiguities, and generates formal Dafny skeleton code.
-    """)
-    
-    # Initialize the auditor
-    auditor = SpecAuditor()
-    
-    # Check configuration status
-    if not auditor.is_configured():
-        st.warning(f"⚠️ {auditor.get_configuration_error()}")
-        st.info("💡 Create a `.env` file with your `GEMINI_API_KEY=your_key_here`")
-    
-    # Sample spec for demo
-    sample_spec = """Rewards System Specification
-
-Users earn points by completing tasks. Each task completion awards 10 points.
-Premium users receive a 2x multiplier on all point earnings.
-
-Users can redeem points for rewards from the reward catalog.
-Each reward has a point cost. When a user redeems a reward, their points are deducted.
-
-Monthly leaderboards track top point earners. The top 3 users receive bonus rewards.
-"""
-    
-    # Text area for spec input
-    spec_text = st.text_area(
-        "Paste Specification Text",
-        value=sample_spec,
-        height=250,
-        help="Paste your English specification here for analysis",
-        key="auditor_spec_input"
-    )
-    
-    # Audit button
-    col_btn, col_status = st.columns([1, 3])
-    with col_btn:
-        audit_clicked = st.button(
-            "🔍 Audit Specification",
-            type="primary",
-            disabled=not auditor.is_configured(),
-            key="audit_button"
-        )
-    
-    # Process audit
-    if audit_clicked and spec_text:
-        with st.spinner("Analyzing specification with Gemini..."):
-            result = auditor.audit_spec(spec_text)
-        
-        # Display results
-        _display_audit_results(result)
-    
-    # Show placeholder if not audited yet
-    elif not audit_clicked:
-        st.info("👆 Click 'Audit Specification' to analyze the spec for logic gaps.")
-
-
-def _display_audit_results(result: GapReport):
-    """
-    Display the audit results in a structured format.
-    
-    Args:
-        result: The GapReport from the auditor.
-    """
-    if result.error:
-        st.error(f"Audit Failed: {result.error}")
-        if result.raw_response:
-            with st.expander("Raw Response (Debug)"):
-                st.text(result.raw_response)
-        return
-    
-    st.divider()
-    st.markdown("## 📋 Audit Results")
-    
-    # Two-column layout for gaps and ambiguities
-    col_gaps, col_ambig = st.columns([1, 1])
-    
-    # Display Gaps
-    with col_gaps:
-        st.markdown("### 🚨 Logic Gaps")
-        if result.gaps:
-            for gap in result.gaps:
-                if gap.severity == "critical":
-                    st.error(f"**CRITICAL**: {gap.description}")
-                else:
-                    st.warning(f"**Warning**: {gap.description}")
-        else:
-            st.success("No logic gaps detected!")
-    
-    # Display Ambiguities
-    with col_ambig:
-        st.markdown("### 🤔 Ambiguities")
-        if result.ambiguities:
-            for amb in result.ambiguities:
-                st.info(f"• {amb}")
-        else:
-            st.success("No ambiguities detected!")
-    
-    # Display Dafny Skeleton
-    st.divider()
-    st.markdown("### 📝 Generated Dafny Skeleton")
-    if result.dafny_skeleton:
-        st.code(result.dafny_skeleton, language="csharp")
-        
-        # Copy hint
-        st.caption("💡 Use this skeleton as a starting point for formal verification.")
-    else:
-        st.info("No Dafny skeleton was generated.")
-    
-    # Summary metrics
-    st.divider()
-    col1, col2, col3 = st.columns(3)
-    critical_count = sum(1 for g in result.gaps if g.severity == "critical")
-    warning_count = sum(1 for g in result.gaps if g.severity == "warning")
-    
-    col1.metric("Critical Gaps", critical_count)
-    col2.metric("Warnings", warning_count)
-    col3.metric("Ambiguities", len(result.ambiguities))
 
 
 def render_gateway_tab():
@@ -414,14 +780,30 @@ def _display_verification_results(result: VerificationResult):
     col2.metric("Result", result.logs)
 
 
-# Main App Layout with Tabs
-tab_lens, tab_auditor, tab_gateway = st.tabs(["📊 Spec Lens", "🔍 Spec Auditor", "🔐 Gateway"])
+# =============================================================================
+# Main App Layout
+# =============================================================================
+
+# Create tabs
+tab_workflow, tab_lens, tab_gateway = st.tabs(["🔄 Design Studio", "📊 Spec Lens", "🔐 Gateway"])
+
+with tab_workflow:
+    # Show stage progress
+    render_stage_progress()
+    st.divider()
+    
+    # Render current stage
+    if st.session_state.current_stage == 1:
+        render_stage_1_triage()
+    elif st.session_state.current_stage == 2:
+        render_stage_2_structure()
+    elif st.session_state.current_stage == 3:
+        render_stage_3_audit()
+    elif st.session_state.current_stage == 4:
+        render_stage_4_approval()
 
 with tab_lens:
     render_lens_tab()
-
-with tab_auditor:
-    render_auditor_tab()
 
 with tab_gateway:
     render_gateway_tab()
