@@ -51,6 +51,8 @@ def init_workflow_state():
         st.session_state.risk_score = 0
     if "rigor_level" not in st.session_state:
         st.session_state.rigor_level = RigorLevel.STANDARD
+    if "edit_mode" not in st.session_state:
+        st.session_state.edit_mode = False
 
 
 def reset_workflow():
@@ -272,15 +274,83 @@ def render_stage_3_audit():
         
         st.divider()
         
+        # Gap Resolution Section
+        report = st.session_state.audit_report
+        critical_count = sum(1 for g in report.gaps if g.severity == "critical")
+        warning_count = sum(1 for g in report.gaps if g.severity == "warning")
+        
+        if critical_count > 0 or warning_count > 0:
+            st.markdown("#### 🔧 Resolve Issues")
+            st.info(f"""
+            **To resolve the {critical_count} critical gap(s) and {warning_count} warning(s):**
+            1. Click "✏️ Edit Specification" below to modify the structured spec
+            2. Address the critical gaps and warnings in the spec text
+            3. Click "💾 Save & Re-audit" to verify your changes resolved the issues
+            4. Repeat until all gaps are addressed to your satisfaction
+            """)
+            
+            col_edit, col_reaudit = st.columns([1, 1])
+            
+            with col_edit:
+                if st.button("✏️ Edit Specification", type="secondary", key="edit_spec_btn"):
+                    st.session_state.edit_mode = True
+                    st.rerun()
+            
+            with col_reaudit:
+                if st.button("🔄 Re-audit Spec", type="primary", key="reaudit_btn"):
+                    # Clear previous audit to force re-run
+                    st.session_state.audit_report = None
+                    st.rerun()
+        
+        # Edit Mode - Show editable spec
+        if st.session_state.get("edit_mode", False):
+            st.divider()
+            st.markdown("#### ✏️ Edit Structured Specification")
+            st.caption("Modify the specification below to address the identified gaps. When finished, save and re-audit.")
+            
+            edited_spec = st.text_area(
+                "Structured Spec",
+                value=st.session_state.structured_spec,
+                height=400,
+                key="audit_spec_editor",
+                label_visibility="collapsed"
+            )
+            
+            # Update structured spec if edited
+            if edited_spec != st.session_state.structured_spec:
+                st.session_state.structured_spec = edited_spec
+            
+            col_save, col_cancel = st.columns([1, 1])
+            with col_save:
+                if st.button("💾 Save & Re-audit", type="primary", key="save_and_reaudit"):
+                    st.session_state.audit_report = None
+                    st.session_state.edit_mode = False
+                    st.rerun()
+            with col_cancel:
+                if st.button("❌ Cancel Editing", key="cancel_edit"):
+                    st.session_state.edit_mode = False
+                    st.rerun()
+        
+        st.divider()
+        
         # Navigation buttons
         col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
             if st.button("⬅️ Back to Structure", key="back_to_structure"):
                 st.session_state.current_stage = 2
                 st.session_state.audit_report = None
+                st.session_state.edit_mode = False
                 st.rerun()
         with col2:
-            if st.button("✅ Continue to Approval", type="primary", key="continue_to_approval"):
+            # Change button style based on gap status
+            if critical_count == 0 and warning_count == 0:
+                button_label = "✅ Continue to Approval"
+                button_type = "primary"
+            else:
+                button_label = f"⚠️ Continue with Issues ({critical_count + warning_count})"
+                button_type = "secondary"
+            
+            if st.button(button_label, type=button_type, key="continue_to_approval"):
                 st.session_state.current_stage = 4
                 st.rerun()
     else:
@@ -445,6 +515,21 @@ def render_stage_4_approval():
             st.success("✅ Specification meets the selected rigor threshold and is ready for finalization.")
         else:
             st.warning("⚠️ Specification exceeds the risk threshold. Consider addressing critical gaps before finalizing.")
+    
+    # Show recommendation to resolve issues if present
+    if critical_count > 0 or warning_count > 0:
+        st.divider()
+        st.warning(f"""
+        **⚠️ Unresolved Issues Detected**
+        
+        You have **{critical_count} critical gap(s)** and **{warning_count} warning(s)** that haven't been addressed.
+        
+        **Recommended:** Go back to Stage 3 to edit the specification and resolve these issues before finalizing.
+        """)
+        
+        if st.button("⬅️ Go Back to Resolve Issues", key="back_to_resolve", type="primary"):
+            st.session_state.current_stage = 3
+            st.rerun()
     
     st.divider()
     
