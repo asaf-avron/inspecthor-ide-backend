@@ -18,9 +18,11 @@ DEFAULT_KNOWLEDGE_PATH = "docs/knowledge/dafny_ref.md"
 MAX_KNOWLEDGE_CHARS = 8000  # Truncate to prevent token overflow
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 except ImportError:
     genai = None
+    types = None
 
 from dotenv import load_dotenv
 
@@ -36,6 +38,41 @@ class Gap:
 
 
 @dataclass
+class TraceabilityEntry:
+    """
+    Represents a single requirement in the traceability matrix.
+    Maps English requirements to Dafny code locations.
+    
+    Attributes:
+        id: Unique identifier formatted as "REF-XX"
+        source_text: The extracted English requirement sentence
+        status: Traceability status (Pending, Implemented, Verified, Missing, Obsolete)
+        code_line: Reference to Dafny code location (e.g., "line 42") or empty
+    """
+    id: str
+    source_text: str
+    status: str = "Pending"  # Pending | Implemented | Verified | Missing | Obsolete
+    code_line: str = ""
+
+
+@dataclass
+class Suggestion:
+    """
+    Represents an AI-generated fix suggestion for a specification gap.
+    
+    Attributes:
+        gap_id: Identifier for the gap being addressed
+        original_text: The snippet of spec text that needs fixing
+        proposed_text: The AI-generated replacement text
+        rationale: Explanation of why this fix addresses the gap
+    """
+    gap_id: str
+    original_text: str
+    proposed_text: str
+    rationale: str
+
+
+@dataclass
 class GapReport:
     """
     Represents the full audit report for a specification.
@@ -43,13 +80,17 @@ class GapReport:
     Attributes:
         gaps: List of logic gaps (critical issues, missing validations)
         ambiguities: List of vague or unclear definitions
-        dafny_skeleton: Generated Dafny trait code skeleton
+        dafny_skeleton: Generated Dafny trait code skeleton with // [REF-XX] comments
+        tagged_spec: The spec rewritten with inline [REF-XX] tags
+        traceability_matrix: List mapping requirements to code locations
         raw_response: The raw LLM response for debugging
         error: Error message if the audit failed
     """
     gaps: list[Gap] = field(default_factory=list)
     ambiguities: list[str] = field(default_factory=list)
     dafny_skeleton: str = ""
+    tagged_spec: str = ""
+    traceability_matrix: list[TraceabilityEntry] = field(default_factory=list)
     raw_response: str = ""
     error: Optional[str] = None
 
@@ -57,13 +98,20 @@ class GapReport:
 # System prompt for the LLM
 SYSTEM_PROMPT = """You are a Senior Formal Verification Engineer specializing in smart contract security and formal methods.
 
-Analyze the following specification text for:
+## TRACEABILITY INSTRUCTION (CRITICAL):
+Break the spec into ATOMIC REQUIREMENTS. An atomic requirement is any sentence or independent clause containing a Normative Keyword: "MUST", "SHALL", "SHOULD", "WILL", "REQUIRES", "ENSURES", or similar imperative language.
+
+For each atomic requirement:
+1. Assign a unique ID in the format [REF-XX] where XX is a sequential number starting at 01
+2. Rewrite the original spec text with these [REF-XX] tags inserted inline before each requirement
+3. In the Dafny skeleton, add // [REF-XX] comments on the lines that implement each requirement
+
+## ANALYSIS TASKS:
 1. **Critical Logic Gaps**: Missing validations (negative numbers, zero amounts, null checks), race conditions, missing edge cases, exploitable logic holes
 2. **Ambiguities**: Vague definitions, unclear state transitions, undefined terms
 3. **Missing Preconditions/Postconditions**: What should be guaranteed before and after operations
 
-Based on your analysis, generate a Dafny trait skeleton that would formally specify this system.
-
+## OUTPUT FORMAT:
 You MUST return ONLY valid JSON with this exact schema (no markdown, no explanation):
 {
   "gaps": [
@@ -74,16 +122,25 @@ You MUST return ONLY valid JSON with this exact schema (no markdown, no explanat
     "First ambiguous definition or unclear requirement",
     "Second ambiguous item"
   ],
-  "dafny_skeleton": "trait SpecName {\\n  // Dafny code here\\n}"
+  "tagged_spec": "The FULL specification text rewritten with [REF-XX] tags inline before each atomic requirement",
+  "traceability_matrix": [
+    {"id": "REF-01", "source_text": "The extracted requirement text", "status": "Pending", "code_line": "ensures clause line reference"},
+    {"id": "REF-02", "source_text": "Another requirement", "status": "Pending", "code_line": ""}
+  ],
+  "dafny_skeleton": "trait SpecName {\\n  // [REF-01] comment\\n  // Dafny code here\\n}"
 }
 
-Rules:
+## RULES:
 - severity must be either "critical" or "warning"
 - Find at least 2-3 gaps if the spec has any complexity
-- The dafny_skeleton should include method signatures with requires/ensures clauses
-- Use \\n for newlines in the dafny_skeleton string
+- tagged_spec MUST contain the full spec with [REF-XX] tags inserted
+- traceability_matrix MUST list ALL atomic requirements found
+- status should be "Pending" for all entries (will be updated later)
+- code_line should reference the Dafny clause that implements the requirement (e.g., "ensures line 5") or empty if not yet mapped
+- dafny_skeleton should include method signatures with requires/ensures clauses, each annotated with // [REF-XX] comments
+- Use \\n for newlines in string fields
 
-CRITICAL Dafny Rules for Map Operations:
+## CRITICAL Dafny Rules for Map Operations:
 - If a method transforms a map (e.g., returns new_db from db), you MUST add a STRUCTURAL INTEGRITY clause:
   ensures success ==> (forall k :: k in db <==> k in new_db)
   This tells Dafny that keys are preserved, which is required before accessing new_db[key] in other ensures clauses.
@@ -132,8 +189,8 @@ class SpecAuditor:
     Postconditions: Returns a GapReport with analysis results or error.
     """
     
-    DEFAULT_MODEL = "gemini-2.0-flash"
-    FALLBACK_MODEL = "gemini-1.5-flash"
+    DEFAULT_MODEL = "models/gemini-2.0-flash-exp"
+    FALLBACK_MODEL = "models/gemini-2.5-flash"
     
     def __init__(self, api_key: Optional[str] = None):
         """
@@ -147,7 +204,7 @@ class SpecAuditor:
         self._model = None
         
         if genai is None:
-            self._init_error = "google-generativeai package not installed. Run: pip install google-generativeai"
+            self._init_error = "google-genai package not installed. Run: pip install google-genai"
         elif not self.api_key:
             self._init_error = "GEMINI_API_KEY not found. Set it in .env file or environment."
         else:
@@ -157,19 +214,15 @@ class SpecAuditor:
     def _configure_genai(self) -> None:
         """Configure the Gemini API with the provided key."""
         if genai and self.api_key:
-            genai.configure(api_key=self.api_key)
+            self._client = genai.Client(api_key=self.api_key)
             try:
-                self._model = genai.GenerativeModel(self.DEFAULT_MODEL)
-            except Exception:
-                # Fallback to older model if 2.0-flash not available
-                try:
-                    self._model = genai.GenerativeModel(self.FALLBACK_MODEL)
-                except Exception as e:
-                    self._init_error = f"Failed to initialize model: {e}"
+                self._model = self.DEFAULT_MODEL
+            except Exception as e:
+                self._init_error = f"Failed to initialize client: {e}"
     
     def is_configured(self) -> bool:
         """Check if the auditor is properly configured."""
-        return self._init_error is None and self._model is not None
+        return self._init_error is None and hasattr(self, '_client')
     
     def get_configuration_error(self) -> Optional[str]:
         """Get the configuration error message if any."""
@@ -213,8 +266,11 @@ class SpecAuditor:
             prompt = f"{SYSTEM_PROMPT}\n\n---\nSPECIFICATION TO ANALYZE:\n---\n{spec_text}"
         
         try:
-            # Call Gemini API
-            response = self._model.generate_content(prompt)
+            # Call Gemini API with new SDK
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=prompt
+            )
             raw_text = response.text
             
             # Parse the JSON response
@@ -266,10 +322,27 @@ class SpecAuditor:
             if isinstance(dafny_skeleton, str):
                 dafny_skeleton = dafny_skeleton.replace("\\n", "\n")
             
+            # Extract tagged spec and unescape newlines
+            tagged_spec = data.get("tagged_spec", "")
+            if isinstance(tagged_spec, str):
+                tagged_spec = tagged_spec.replace("\\n", "\n")
+            
+            # Extract traceability matrix
+            traceability_matrix = []
+            for entry_data in data.get("traceability_matrix", []):
+                traceability_matrix.append(TraceabilityEntry(
+                    id=entry_data.get("id", ""),
+                    source_text=entry_data.get("source_text", ""),
+                    status=entry_data.get("status", "Pending"),
+                    code_line=entry_data.get("code_line", "")
+                ))
+            
             return GapReport(
                 gaps=gaps,
                 ambiguities=ambiguities,
                 dafny_skeleton=dafny_skeleton,
+                tagged_spec=tagged_spec,
+                traceability_matrix=traceability_matrix,
                 raw_response=raw_text
             )
             
@@ -278,6 +351,84 @@ class SpecAuditor:
                 error=f"Failed to parse LLM response as JSON: {e}",
                 raw_response=raw_text
             )
+    
+    def generate_suggestion(self, spec_text: str, gap: Gap) -> Optional[Suggestion]:
+        """
+        Generate an AI-powered fix suggestion for a specific gap.
+        
+        Args:
+            spec_text: The current specification text
+            gap: The Gap object to generate a fix for
+            
+        Returns:
+            Suggestion object with fix details, or None if generation fails
+        """
+        # Check configuration
+        if self._init_error:
+            return None
+        
+        if not spec_text or not gap:
+            return None
+        
+        # Build the prompt for suggestion generation
+        suggestion_prompt = f"""You are a Tech Lead fixing specification gaps.
+
+GAP: {gap.description}
+SEVERITY: {gap.severity}
+
+CURRENT SPECIFICATION:
+---
+{spec_text}
+---
+
+TASK: Identify the specific section of the specification that causes this gap and propose a minimal fix.
+
+You MUST return ONLY valid JSON with this exact schema (no markdown, no explanation):
+{{
+  "original_text": "The exact text from the spec that needs to be fixed (must match verbatim)",
+  "proposed_text": "The replacement text that fixes the gap",
+  "rationale": "Brief explanation of how this fix addresses the gap"
+}}
+
+RULES:
+- original_text MUST be an exact substring from the specification above
+- Keep changes minimal and surgical - only fix what's necessary
+- proposed_text should preserve the style and format of the original
+- If the gap requires adding new text, set original_text to the nearest context and proposed_text to include both context and new content
+- rationale should be concise (1-2 sentences)
+"""
+        
+        try:
+            # Call Gemini API
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=suggestion_prompt
+            )
+            raw_text = response.text
+            
+            # Parse the JSON response
+            cleaned = raw_text.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+            
+            data = json.loads(cleaned)
+            
+            # Create suggestion object
+            return Suggestion(
+                gap_id=f"{gap.severity}_{hash(gap.description) % 10000}",
+                original_text=data.get("original_text", ""),
+                proposed_text=data.get("proposed_text", ""),
+                rationale=data.get("rationale", "")
+            )
+            
+        except Exception as e:
+            # Return None on error - caller can handle gracefully
+            return None
 
 
 def audit_specification(spec_text: str, api_key: Optional[str] = None) -> GapReport:
