@@ -56,6 +56,23 @@ class TraceabilityEntry:
 
 
 @dataclass
+class Suggestion:
+    """
+    Represents an AI-generated fix suggestion for a specification gap.
+    
+    Attributes:
+        gap_id: Identifier for the gap being addressed
+        original_text: The snippet of spec text that needs fixing
+        proposed_text: The AI-generated replacement text
+        rationale: Explanation of why this fix addresses the gap
+    """
+    gap_id: str
+    original_text: str
+    proposed_text: str
+    rationale: str
+
+
+@dataclass
 class GapReport:
     """
     Represents the full audit report for a specification.
@@ -334,6 +351,84 @@ class SpecAuditor:
                 error=f"Failed to parse LLM response as JSON: {e}",
                 raw_response=raw_text
             )
+    
+    def generate_suggestion(self, spec_text: str, gap: Gap) -> Optional[Suggestion]:
+        """
+        Generate an AI-powered fix suggestion for a specific gap.
+        
+        Args:
+            spec_text: The current specification text
+            gap: The Gap object to generate a fix for
+            
+        Returns:
+            Suggestion object with fix details, or None if generation fails
+        """
+        # Check configuration
+        if self._init_error:
+            return None
+        
+        if not spec_text or not gap:
+            return None
+        
+        # Build the prompt for suggestion generation
+        suggestion_prompt = f"""You are a Tech Lead fixing specification gaps.
+
+GAP: {gap.description}
+SEVERITY: {gap.severity}
+
+CURRENT SPECIFICATION:
+---
+{spec_text}
+---
+
+TASK: Identify the specific section of the specification that causes this gap and propose a minimal fix.
+
+You MUST return ONLY valid JSON with this exact schema (no markdown, no explanation):
+{{
+  "original_text": "The exact text from the spec that needs to be fixed (must match verbatim)",
+  "proposed_text": "The replacement text that fixes the gap",
+  "rationale": "Brief explanation of how this fix addresses the gap"
+}}
+
+RULES:
+- original_text MUST be an exact substring from the specification above
+- Keep changes minimal and surgical - only fix what's necessary
+- proposed_text should preserve the style and format of the original
+- If the gap requires adding new text, set original_text to the nearest context and proposed_text to include both context and new content
+- rationale should be concise (1-2 sentences)
+"""
+        
+        try:
+            # Call Gemini API
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=suggestion_prompt
+            )
+            raw_text = response.text
+            
+            # Parse the JSON response
+            cleaned = raw_text.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+            
+            data = json.loads(cleaned)
+            
+            # Create suggestion object
+            return Suggestion(
+                gap_id=f"{gap.severity}_{hash(gap.description) % 10000}",
+                original_text=data.get("original_text", ""),
+                proposed_text=data.get("proposed_text", ""),
+                rationale=data.get("rationale", "")
+            )
+            
+        except Exception as e:
+            # Return None on error - caller can handle gracefully
+            return None
 
 
 def audit_specification(spec_text: str, api_key: Optional[str] = None) -> GapReport:
