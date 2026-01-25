@@ -1,14 +1,80 @@
-# Guardian Gateway - Docker Compose
+# Guardian Gateway - Full Stack Docker Compose
+# Includes: Backend API, Frontend IDE, PostgreSQL Database
 # Run with: docker-compose up --build
 
+version: '3.8'
+
 services:
-  guardian-gateway:
-    build: .
-    container_name: guardian-gateway
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: guardian-db
+    environment:
+      POSTGRES_DB: guardian_gateway
+      POSTGRES_USER: guardian
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-guardian_dev_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     ports:
-      - "8501:8501"
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U guardian" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Backend API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: guardian-api
+    ports:
+      - "8000:8000"
+    environment:
+      # Database connection
+      DATABASE_URL: postgresql://guardian:${DB_PASSWORD:-guardian_dev_password}@db:5432/guardian_gateway
+
+      # API Configuration
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ALLOWED_API_KEYS: ${ALLOWED_API_KEYS:-dev_key_1,dev_key_2}
+      API_SECRET_KEY: ${API_SECRET_KEY:-dev_secret_key}
+
+      # CORS - allow frontend
+      CORS_ORIGINS: http://localhost:3000,http://frontend:3000
+
+      # Rate limiting
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
     volumes:
       - .:/app
-    env_file:
-      - .env
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
+
+  # Frontend IDE Service
+  frontend:
+    build:
+      context: ../v0-guardian-gateway-ide
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    container_name: guardian-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # Point to backend API
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      GUARDIAN_API_KEY: ${GUARDIAN_API_KEY:-dev_key_1}
+    volumes:
+      - ../v0-guardian-gateway-ide:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
