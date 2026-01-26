@@ -7,11 +7,6 @@ from typing import List, Literal, Optional
 
 
 # === Stage 1-2: Generation Models ===
-class GenerateSpecRequest(BaseModel):
-    english_spec: str
-    rigor_level: Literal["sanity", "standard", "paranoid"] = "standard"
-
-
 class GapLocation(BaseModel):
     line: Optional[int] = None
     column: Optional[int] = None
