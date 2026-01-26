@@ -8,7 +8,12 @@
 
 ## Overview
 
-This document outlines the step-by-step plan to fully integrate the Guardian Gateway IDE frontend with the FastAPI backend. We'll go flow-by-flow, ensuring each user interaction is properly connected to backend services.
+This document provides a high-level roadmap for integrating the Guardian Gateway IDE frontend with the FastAPI backend. Each major feature has a detailed specification document following a provable approach with tightly defined requirements, postconditions, and success criteria.
+
+**Related Specifications:**
+- [Project Management](./specs/dev/Dev_Spec_Project_Management.md) - Phase 1
+- [File Operations](./specs/dev/Dev_Spec_File_Operations.md) - Phase 2
+- [Deconstruct to Units](./specs/dev/Dev_Spec_Deconstruct_To_Units.md) - Phase 3
 
 ---
 
@@ -69,73 +74,29 @@ This document outlines the step-by-step plan to fully integrate the Guardian Gat
 
 **Goal:** Enable users to create, list, and switch between projects.
 
-#### Step 1.1: Backend - Project Management API
+**Detailed Specification:** [Dev_Spec_Project_Management.md](./specs/dev/Dev_Spec_Project_Management.md)
 
-**Files to Create/Modify:**
-- `api/projects.py` (new)
-- `api/database.py` (add Project model)
-- `api/main.py` (include projects router)
+**Summary:**
+- Backend: Full CRUD API for projects with ownership isolation
+- Frontend: Project selector, creation dialog, switching logic
+- Database: Project model with cascade delete to files
 
-**Endpoints to Implement:**
-```python
-POST   /api/projects              # Create new project
-GET    /api/projects              # List all projects for API key
-GET    /api/projects/{project_id} # Get project details
-DELETE /api/projects/{project_id} # Delete project (and all files)
-```
+**Key Endpoints:**
+- `POST /api/projects` - Create project
+- `GET /api/projects` - List projects (paginated)
+- `GET /api/projects/{project_id}` - Get project
+- `PUT /api/projects/{project_id}` - Update project
+- `DELETE /api/projects/{project_id}` - Delete project (cascade)
 
-**Database Schema:**
-```python
-class Project(Base):
-    project_id: str (UUID, primary key)
-    api_key_hash: str
-    name: str
-    description: Optional[str]
-    created_at: datetime
-    updated_at: datetime
-```
-
-**Tasks:**
-- [ ] Create `api/projects.py` router
-- [ ] Add Project model to database
-- [ ] Implement CRUD operations
-- [ ] Add project_id foreign key to File model
-- [ ] Update File endpoints to require project_id
-- [ ] Add migration script
-
-**Success Criteria:**
-- Can create project via API
-- Can list all projects
-- Can delete project (cascades to files)
-- Files are properly scoped to projects
-
-#### Step 1.2: Frontend - Project Management UI
-
-**Files to Modify:**
-- `lib/api-client.ts` (add project functions)
-- `lib/project-context.tsx` (add project management)
-- `components/ide/header.tsx` (add project selector)
-- `app/page.tsx` (add project creation flow)
-
-**New Components:**
-- `components/ide/project-selector.tsx` (new)
-- `components/ide/project-dialog.tsx` (new)
-
-**Tasks:**
-- [ ] Add project API client functions
-- [ ] Add project state to ProjectContext
-- [ ] Create project selector dropdown in header
-- [ ] Create "New Project" dialog
-- [ ] Update createProject to use backend
-- [ ] Add project switching logic
-- [ ] Update file loading to filter by project_id
-- [ ] Show project name in UI
-
-**Success Criteria:**
-- User can create new project from UI
-- User can switch between projects
-- Files are filtered by selected project
-- Project name displayed in header
+**Implementation Checklist:**
+- [ ] Backend: Project model and migration
+- [ ] Backend: All 5 endpoints implemented
+- [ ] Backend: Tests written
+- [ ] Frontend: API client functions
+- [ ] Frontend: Project selector component
+- [ ] Frontend: Project creation dialog
+- [ ] Frontend: Project switching logic
+- [ ] Integration: End-to-end testing
 
 ---
 
@@ -143,56 +104,32 @@ class Project(Base):
 
 **Goal:** Complete file CRUD operations with proper state management.
 
-#### Step 2.1: Backend - File Update Endpoint
+**Detailed Specification:** [Dev_Spec_File_Operations.md](./specs/dev/Dev_Spec_File_Operations.md)
 
-**Files to Modify:**
-- `api/files.py`
+**Summary:**
+- Backend: File update endpoint (PUT/PATCH)
+- Frontend: Auto-save, file loading, delete, rename, create
+- State Management: Save state indicators, error handling, retry logic
 
-**Endpoints to Add:**
-```python
-PUT    /api/files/{file_id}       # Update existing file
-PATCH  /api/files/{file_id}       # Partial update
-```
+**Key Features:**
+- Auto-save with 2-second debounce
+- Save state indicator (saved/unsaved/saving/error)
+- File loading on selection with caching
+- Delete with confirmation dialog
+- Rename functionality
+- Create new files (markdown or Dafny)
 
-**Tasks:**
-- [ ] Add PUT endpoint for full file update
-- [ ] Add PATCH endpoint for partial updates
-- [ ] Validate file ownership
-- [ ] Update updated_at timestamp
-- [ ] Return updated file response
-
-**Success Criteria:**
-- Can update file content via API
-- File versioning/timestamps work correctly
-- Ownership validation prevents unauthorized updates
-
-#### Step 2.2: Frontend - File Operations UI
-
-**Files to Modify:**
-- `lib/api-client.ts` (add updateFile function)
-- `lib/project-context.tsx` (enhance file operations)
-- `components/ide/project-explorer.tsx` (add delete, rename)
-- `components/ide/markdown-editor.tsx` (auto-save, save indicator)
-- `components/ide/code-editor.tsx` (auto-save, save indicator)
-
-**Tasks:**
-- [ ] Add updateFile to API client
-- [ ] Implement file loading on selection
-- [ ] Add file deletion with confirmation
-- [ ] Add file rename functionality
-- [ ] Implement auto-save (debounced)
-- [ ] Add save status indicator (saved/unsaved/saving)
-- [ ] Handle file conflicts (concurrent edits)
-- [ ] Add file creation (new .md, new .dfy)
-- [ ] Update file list after operations
-
-**Success Criteria:**
-- Files load when selected
-- Files save automatically after edits
-- Can delete files with confirmation
-- Can rename files
-- Save status clearly indicated
-- File list updates in real-time
+**Implementation Checklist:**
+- [ ] Backend: PUT /api/files/{file_id} endpoint
+- [ ] Backend: Filename uniqueness validation
+- [ ] Frontend: updateFile API client function
+- [ ] Frontend: Auto-save with debounce
+- [ ] Frontend: Save state indicator component
+- [ ] Frontend: File loading on selection
+- [ ] Frontend: Delete with confirmation
+- [ ] Frontend: Rename functionality
+- [ ] Frontend: Create new file flow
+- [ ] Integration: End-to-end testing
 
 ---
 
@@ -200,76 +137,31 @@ PATCH  /api/files/{file_id}       # Partial update
 
 **Goal:** Implement specification deconstruction into verifiable units.
 
-#### Step 3.1: Backend - Deconstruct Endpoint
+**Detailed Specification:** [Dev_Spec_Deconstruct_To_Units.md](./specs/dev/Dev_Spec_Deconstruct_To_Units.md)
 
-**Files to Create/Modify:**
-- `api/deconstruct.py` (new)
-- `core/workflow.py` (add deconstruct logic)
-- `api/main.py` (include deconstruct router)
+**Summary:**
+- Backend: Deconstruction algorithm, unit identification, Dafny generation
+- Frontend: Deconstruct button, progress feedback, unit file display
+- Database: Unit links table, file metadata enhancements
 
-**Endpoints to Implement:**
-```python
-POST   /api/deconstruct           # Deconstruct spec into units
-```
+**Key Features:**
+- Automatic unit identification from markdown structure
+- Unit file creation (.unit.md)
+- Dafny code generation for each unit
+- Unit-to-Dafny file linking
+- Traceability maintenance
 
-**Request Model:**
-```python
-class DeconstructRequest(BaseModel):
-    project_id: str
-    source_file_id: str           # The root spec file
-    strategy: Literal["auto", "manual"] = "auto"
-    max_units: Optional[int] = None
-```
-
-**Response Model:**
-```python
-class DeconstructResponse(BaseModel):
-    units: List[UnitFile]
-    links: List[UnitLink]         # Unit -> Dafny file mappings
-    statistics: DeconstructStats
-```
-
-**Tasks:**
-- [ ] Create deconstruct router
-- [ ] Implement deconstruction algorithm:
-  - Parse markdown structure
-  - Identify logical units (requirements, functions, methods)
-  - Create unit files (.unit.md)
-  - Generate corresponding Dafny files (.dfy)
-  - Create traceability links
-- [ ] Save unit files to database
-- [ ] Return unit list with metadata
-
-**Success Criteria:**
-- Can deconstruct root spec into units
-- Units are saved as separate files
-- Unit-to-dfy links are created
-- Traceability maintained
-
-#### Step 3.2: Frontend - Deconstruct UI
-
-**Files to Modify:**
-- `lib/api-client.ts` (add deconstruct function)
-- `lib/project-context.tsx` (add deconstructToUnits)
-- `components/ide/markdown-editor.tsx` (enhance deconstruct button)
-- `components/ide/project-explorer.tsx` (show unit files)
-- `app/page.tsx` (connect deconstruct handler)
-
-**Tasks:**
-- [ ] Add deconstruct API client function
-- [ ] Implement deconstructToUnits in context
-- [ ] Add loading state during deconstruction
-- [ ] Show progress/status during deconstruction
-- [ ] Refresh file list after deconstruction
-- [ ] Highlight unit files in explorer
-- [ ] Show unit-to-dfy links in traceability view
-- [ ] Add "Deconstruct" button to root files only
-
-**Success Criteria:**
-- Deconstruct button works end-to-end
-- Units appear in file explorer
-- Unit files are properly linked
-- Progress feedback during operation
+**Implementation Checklist:**
+- [ ] Backend: Markdown parsing and unit identification
+- [ ] Backend: Unit file generation logic
+- [ ] Backend: Dafny code generation per unit
+- [ ] Backend: Unit links table and model
+- [ ] Backend: POST /api/deconstruct endpoint
+- [ ] Frontend: deconstruct API client function
+- [ ] Frontend: deconstructToUnits in context
+- [ ] Frontend: Progress indicator
+- [ ] Frontend: Unit file highlighting
+- [ ] Integration: End-to-end testing
 
 ---
 
@@ -375,22 +267,35 @@ class DeconstructResponse(BaseModel):
 ## Implementation Order
 
 ### Week 1: Foundation
-1. ✅ Phase 1.1: Backend Project Management
-2. ✅ Phase 1.2: Frontend Project Management
-3. ✅ Phase 2.1: Backend File Update
+1. **Phase 1: Project Management** (See [Dev_Spec_Project_Management.md](./specs/dev/Dev_Spec_Project_Management.md))
+   - Backend: Project CRUD API
+   - Frontend: Project management UI
+   - **Estimated:** 2-3 days
 
 ### Week 2: Core Features
-4. ✅ Phase 2.2: Frontend File Operations
-5. ✅ Phase 3.1: Backend Deconstruct
-6. ✅ Phase 3.2: Frontend Deconstruct
+2. **Phase 2: File Operations** (See [Dev_Spec_File_Operations.md](./specs/dev/Dev_Spec_File_Operations.md))
+   - Backend: File update endpoint
+   - Frontend: Auto-save, delete, rename, create
+   - **Estimated:** 3-4 days
 
-### Week 3: Polish
-7. ✅ Phase 4.1: Error Handling
-8. ✅ Phase 4.2: File Edit/View Flow
-9. ✅ Phase 4.3: Verification Enhancement
+### Week 3: Enhancement
+3. **Phase 3: Deconstruct to Units** (See [Dev_Spec_Deconstruct_To_Units.md](./specs/dev/Dev_Spec_Deconstruct_To_Units.md))
+   - Backend: Deconstruction algorithm and endpoint
+   - Frontend: Deconstruct UI flow
+   - **Estimated:** 4-5 days
 
-### Week 4: Advanced
-10. ✅ Phase 5: Advanced Features (as needed)
+### Week 4: Polish
+4. **Phase 4: Enhanced User Flows**
+   - Error handling & feedback
+   - File edit/view improvements
+   - Verification flow enhancements
+   - **Estimated:** 2-3 days
+
+### Future
+5. **Phase 5: Advanced Features** (as needed)
+   - Project templates
+   - File search & filtering
+   - Collaboration features
 
 ---
 
@@ -430,4 +335,14 @@ For each phase, verify:
 
 ---
 
-**Next Steps:** Start with Phase 1.1 - Backend Project Management API.
+## Next Steps
+
+1. **Review Specifications:** Read the detailed spec documents for each phase
+2. **Start Implementation:** Begin with Phase 1 - Project Management
+3. **Follow Provable Approach:** Each spec defines:
+   - Logic Model (definitions, state space, dependencies)
+   - Capabilities (goals, inputs, logic, validation, decisions, results)
+   - Postconditions (global invariants)
+   - Testing Requirements (unit, integration, success criteria)
+
+**First Task:** Implement [Dev_Spec_Project_Management.md](./specs/dev/Dev_Spec_Project_Management.md) - Backend Project Management API
