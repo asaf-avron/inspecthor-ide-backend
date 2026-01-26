@@ -33,6 +33,10 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         self.public_paths = {"/api/health", "/docs", "/redoc", "/openapi.json"}
     
     async def dispatch(self, request: Request, call_next):
+        # Allow OPTIONS requests (CORS preflight) without authentication
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        
         # Allow public endpoints
         if request.url.path in self.public_paths:
             return await call_next(request)
