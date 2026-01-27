@@ -2,7 +2,25 @@
 
 ## 1. The Logic Model
 
-Enhanced file management system supporting full CRUD operations with proper state management, auto-save, and file versioning.
+A robust file synchronization system handling high-frequency edits and race conditions. It uses a Finite State Machine (FSM) to ensure data consistency between Client and Server.
+
+### Save State Machine
+
+```
+stateDiagram-v2
+    [*] --> Clean
+    Clean --> Dirty : User Types
+    Dirty --> Saving : Debounce (2s) Ends
+    Saving --> Clean : API Success
+    Saving --> Error : API Fail
+    Error --> Saving : Retry (Auto/Manual)
+    
+    note right of Dirty
+        Condition: If user types while "Saving",
+        the state must transition to "Dirty" 
+        immediately after the current Save completes.
+    end note
+```
 
 ### Dependencies
 - **File Management API:** Existing `/api/files` endpoints
@@ -29,9 +47,11 @@ Enhanced file management system supporting full CRUD operations with proper stat
 
 ## 2. Capabilities
 
-### Capability 2.1: Update File (Backend)
+### Capability 2.1: Atomic Update (Backend)
 
-**Goal:** Update existing file content without creating new file.
+**Goal:** Update file content atomically.
+
+**Endpoint:** `PUT /api/files/{file_id}`
 
 **Input:**
 - Path parameter: `file_id: UUID`
@@ -43,12 +63,9 @@ class FileUpdateRequest(BaseModel):
 ```
 
 **Logic:**
-1. Extract API key and hash
-2. Find file WHERE file_id = id AND api_key_hash = hash
-3. Update content and size_bytes
-4. Update updated_at timestamp
-5. If filename provided, update filename
-6. Save changes
+1. Verify ownership (API key hash)
+2. Update content and `updated_at`
+3. Return `updated_at` timestamp
 
 **Validation:**
 - file_id must be valid UUID
@@ -60,7 +77,7 @@ class FileUpdateRequest(BaseModel):
 **Decision:**
 - If validation fails: Return 400 Bad Request
 - If not found/unauthorized: Return 404 Not Found
-- If successful: Return 200 OK with updated file
+- If successful: Return 200 OK with updated file and timestamp
 
 **Result:**
 ```python
@@ -71,15 +88,16 @@ class FileResponse(BaseModel):
     file_type: str
     project_id: Optional[str]
     created_at: str
-    updated_at: str
+    updated_at: str  # Returned timestamp used for sync verification
     size_bytes: int
 ```
 
 **Postconditions:**
-1. File content is updated
-2. updated_at timestamp is refreshed
-3. size_bytes is recalculated
-4. created_at remains unchanged
+1. File content is updated atomically
+2. `updated_at` timestamp is refreshed
+3. `size_bytes` is recalculated
+4. `created_at` remains unchanged
+5. Timestamp returned for client sync verification
 
 ---
 
@@ -123,22 +141,36 @@ class FileResponse(BaseModel):
 
 ---
 
-### Capability 2.3: Auto-Save (Frontend)
+### Capability 2.3: Safe Auto-Save (Frontend Hook)
 
-**Goal:** Automatically save file changes after user stops typing.
+**Goal:** Save changes without overwriting newer edits.
 
-**Input:**
-- File content changes (debounced)
+**State Variables:**
+- `local_content`: The text in the editor
+- `synced_content`: The last text confirmed saved by server
+- `status`: CLEAN | DIRTY | SAVING | ERROR
 
-**Logic:**
-1. User types in editor
-2. Debounce timer starts (2 seconds)
-3. On timer expiration:
-   - Set save_state to "Saving"
-   - If file_id exists: Call `apiClient.updateFile(file_id, content)`
-   - If no file_id: Call `apiClient.saveFile(...)` (create new)
-4. On success: Set save_state to "Saved", update last_saved_at
-5. On error: Set save_state to "Error", show error message
+**Logic (The useAutoSave Hook):**
+
+1. **Edit Event:** User types
+   - Update `local_content`
+   - Set `status = DIRTY`
+   - Start/Reset Debounce Timer (2000ms)
+
+2. **Timer Expires:**
+   - Snapshot `local_content` -> `payload`
+   - Set `status = SAVING`
+   - Call `PUT /api/files/{id}`
+
+3. **API Response:**
+   - **Success:**
+     - Update `synced_content = payload`
+     - Check: Is `local_content == synced_content`?
+       - **Yes:** Set `status = CLEAN`
+       - **No:** Set `status = DIRTY` (User typed during save). Trigger immediate short debounce (500ms)
+   - **Failure:**
+     - Set `status = ERROR`
+     - Show "Retry" toast
 
 **Validation:**
 - Content must be non-empty
@@ -149,21 +181,59 @@ class FileResponse(BaseModel):
 - If content empty: Skip save (but allow deletion)
 - If save fails: Show error, allow manual retry
 - If successful: Update UI to show saved state
+- If user types during save: Queue another save after current completes
 
 **Result:**
 - File is saved automatically
 - Save indicator shows current state
 - User can continue editing
+- Race conditions are handled correctly
 
 **Postconditions:**
 1. File is saved within 2 seconds of last edit
 2. Save state is accurately reflected
 3. Errors are handled gracefully
 4. No data loss on network errors (retry mechanism)
+5. User edits during save are preserved and saved immediately after
 
 ---
 
-### Capability 2.4: Delete File (Frontend)
+### Capability 2.4: File Switch Guard
+
+**Goal:** Prevent data loss when switching active files.
+
+**Logic:**
+1. User clicks File B in sidebar
+2. Check File A status
+3. **If DIRTY or SAVING:**
+   - Trigger "Force Save" (bypass debounce) for File A
+   - Optimistically navigate to File B
+   - If File A save fails in background, push a Toast Notification: "Failed to save [Filename]"
+4. **If CLEAN:**
+   - Navigate immediately
+
+**Validation:**
+- File A must exist
+- File B must be valid
+
+**Decision:**
+- If File A is dirty: Force save before switching
+- If File A save fails: Show toast, allow user to return
+- If File A is clean: Switch immediately
+
+**Result:**
+- No data loss when switching files
+- User can continue working on new file
+- Failed saves are notified
+
+**Postconditions:**
+1. All dirty files are saved before switching
+2. User is notified of any save failures
+3. File switching is smooth and predictable
+
+---
+
+### Capability 2.5: Delete File (Frontend)
 
 **Goal:** Allow users to delete files with confirmation.
 
@@ -204,7 +274,7 @@ class FileResponse(BaseModel):
 
 ---
 
-### Capability 2.5: Rename File (Frontend)
+### Capability 2.6: Rename File (Frontend)
 
 **Goal:** Allow users to rename files.
 
@@ -245,7 +315,7 @@ class FileResponse(BaseModel):
 
 ---
 
-### Capability 2.6: Create New File (Frontend)
+### Capability 2.7: Create New File (Frontend)
 
 **Goal:** Allow users to create new files (markdown or Dafny).
 
@@ -290,12 +360,23 @@ class FileResponse(BaseModel):
 
 ## 3. API Endpoints
 
-### New Endpoint
+### PUT /api/files/{file_id}
 
-**PUT /api/files/{file_id}**
-- Updates existing file content
-- Requires file ownership
-- Returns updated file
+**Purpose:** Atomic update of file content
+
+**Request:**
+- Path: `/api/files/{file_id}`
+- Method: `PUT`
+- Body: `{ "content": "...", "filename": "optional_rename" }`
+
+**Response:**
+- Returns updated file with `updated_at` timestamp
+- Timestamp used by client for sync verification
+
+**Logic:**
+1. Verify ownership (API key hash)
+2. Update content and `updated_at`
+3. Return `updated_at` timestamp
 
 **PATCH /api/files/{file_id}** (Optional)
 - Partial update (content or filename only)
@@ -310,34 +391,44 @@ class FileResponse(BaseModel):
 
 ---
 
-## 4. Frontend State Management
+## 4. Frontend Implementation Details
 
-### Save State Indicator
+### Context: FileContext
+
+This context manages the currently active file and its status.
 
 ```typescript
-type SaveState = "saved" | "unsaved" | "saving" | "error";
+type FileStatus = "clean" | "dirty" | "saving" | "error";
 
-interface FileState {
-  file_id: string | null;
-  content: string;
-  save_state: SaveState;
-  last_saved_at: Date | null;
-  last_modified_at: Date;
+interface ActiveFileState {
+  id: string;
+  content: string; // The "source of truth" for the editor
+  status: FileStatus;
+  lastSavedAt: Date;
+  syncedContent: string; // Last confirmed saved content
 }
 ```
+
+### Visual Indicators
+
+**Dirty:** Small orange dot next to filename  
+**Saving:** Spinning loader icon  
+**Clean:** No icon (or fade-out green check)  
+**Error:** Red alert icon (clickable to retry)
 
 ### UI Components
 
 **Save Indicator:**
-- "Saved" - Green checkmark (when save_state === "saved")
-- "Saving..." - Spinner (when save_state === "saving")
-- "Unsaved" - Orange dot (when save_state === "unsaved")
-- "Error" - Red X with retry button (when save_state === "error")
+- "Clean" - No icon or fade-out green checkmark (when status === "clean")
+- "Saving..." - Spinner (when status === "saving")
+- "Dirty" - Orange dot (when status === "dirty")
+- "Error" - Red X with retry button (when status === "error")
 
 **File Explorer Actions:**
 - Right-click menu: Rename, Delete
 - Double-click filename: Rename inline
 - Delete button: With confirmation dialog
+- File switch: Automatically saves dirty files before switching
 
 ---
 
@@ -397,8 +488,10 @@ interface FileState {
 - [ ] File update with valid/invalid content
 - [ ] Filename uniqueness validation
 - [ ] Auto-save debounce timing
-- [ ] Save state transitions
+- [ ] Save state transitions (Clean → Dirty → Saving → Clean/Error)
 - [ ] Error handling and retry
+- [ ] Race condition: Typing during save triggers second save
+- [ ] File switch guard: Dirty files saved before switching
 
 ### Integration Tests
 - [ ] Full CRUD workflow
@@ -406,6 +499,9 @@ interface FileState {
 - [ ] File deletion and cleanup
 - [ ] Concurrent edit detection
 - [ ] Network error recovery
+- [ ] **Race Condition:** Typing during a save request triggers a second save immediately after the first finishes
+- [ ] **Switching:** Switching files triggers an immediate save of the previous file
+- [ ] **Debounce:** Typing continuously for 5 seconds results in only 1 save request (at the end/pause)
 
 ### Success Criteria
 - ✅ Files load in < 200ms (cached) or < 1s (network)
@@ -413,6 +509,8 @@ interface FileState {
 - ✅ Save state accurately reflects file status
 - ✅ No data loss on network errors
 - ✅ File operations are atomic
+- ✅ Race conditions handled correctly (no lost edits)
+- ✅ File switching prevents data loss
 
 ---
 
@@ -427,14 +525,27 @@ interface FileState {
 
 ### Frontend
 - [ ] Add updateFile to `lib/api-client.ts`
+- [ ] Implement FileContext with ActiveFileState interface
+- [ ] Create useAutoSave hook with race condition handling
+  - [ ] Implement local_content and synced_content tracking
+  - [ ] Implement debounce timer (2s default, 500ms for post-save)
+  - [ ] Handle state transitions: Clean → Dirty → Saving → Clean/Error
+  - [ ] Handle race conditions (typing during save)
+- [ ] Implement File Switch Guard
+  - [ ] Check file status before switching
+  - [ ] Force save dirty files before navigation
+  - [ ] Show toast notifications for failed saves
 - [ ] Implement file loading in `lib/project-context.tsx`
-- [ ] Add auto-save with debounce
-- [ ] Add save state indicator component
+- [ ] Add save state indicator component with visual indicators
+  - [ ] Orange dot for Dirty
+  - [ ] Spinner for Saving
+  - [ ] Green checkmark (fade-out) for Clean
+  - [ ] Red alert with retry for Error
 - [ ] Implement delete with confirmation
 - [ ] Implement rename functionality
 - [ ] Add "New File" creation flow
 - [ ] Add error handling and retry
-- [ ] Write tests
+- [ ] Write tests for race conditions and file switching
 
 ---
 
