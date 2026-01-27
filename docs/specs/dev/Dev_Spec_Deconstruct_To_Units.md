@@ -2,7 +2,30 @@
 
 ## 1. The Logic Model
 
-A system that automatically breaks down a root specification into smaller, verifiable units, each with its own Dafny implementation file and traceability links.
+Automated breakdown of monolithic specifications into verifiable units with granular traceability links. This feature uses AI to identify logic boundaries and maps them to specific line numbers for UI highlighting.
+
+### Deconstruction Flow
+
+```
+sequenceDiagram
+    participant User
+    participant API
+    participant AI_Service
+    participant DB
+
+    User->>API: POST /deconstruct (Root_ID)
+    API->>AI_Service: Analyze MD Structure (AST)
+    AI_Service-->>API: Return JSON { units: [{title, range, reqs}] }
+    
+    loop For Each Unit
+        API->>AI_Service: Generate Dafny Spec
+        API->>DB: Create .unit.md File
+        API->>DB: Create .dfy File
+        API->>DB: Create Link Record (TraceabilityMap)
+    end
+    
+    API-->>User: Success (New File Tree + Links)
+```
 
 ### Dependencies
 - **Project Management:** Projects API (Phase 1)
@@ -43,48 +66,27 @@ class Unit(BaseModel):
 
 ## 2. Capabilities
 
-### Capability 2.1: Identify Units (Backend)
+### Capability 2.1: Intelligent Unit Identification
 
-**Goal:** Analyze root specification and identify logical units for deconstruction.
+**Goal:** Identify logical boundaries and return Line Ranges.
 
 **Input:**
-- `structured_spec: str` (markdown content)
-- `strategy: DeconstructionStrategy` (default: "auto")
+- Markdown Content (from Root File)
 
-**Logic (Auto Strategy):**
-1. Parse markdown structure:
-   - Identify top-level headers (##)
-   - Group content under each header
-   - Identify function definitions (### Function:)
-   - Identify entity definitions (**Entities:**)
-2. For each logical section:
-   - Extract requirements
-   - Identify dependencies on other sections
-   - Determine if section is independently verifiable
-3. Create unit candidates:
-   - Each function → potential unit
-   - Each entity group → potential unit
-   - Each invariant set → potential unit
-4. Validate units:
-   - Unit must have clear requirements
-   - Unit must be independently testable
-   - Unit must not have circular dependencies
-
-**Logic (Manual Strategy):**
-1. Use user-provided unit boundaries
-2. Validate boundaries are valid
-3. Extract content for each unit
+**Logic:**
+1. Send content to AI Service with prompt: "Identify independent logical units. Return title, requirements, and start/end line numbers from source."
+2. **Constraint:** Line numbers must map exactly to the provided markdown.
 
 **Validation:**
 - Root spec must have structure (headers, functions)
 - At least one unit must be identifiable
+- Line numbers must be valid (within markdown bounds)
 - Units must not overlap
-- Units must cover entire spec (no gaps)
 
 **Decision:**
 - If no units found: Return error "Specification structure not suitable for deconstruction"
 - If validation fails: Return error with details
-- If successful: Return list of identified units
+- If successful: Return list of identified units with line ranges
 
 **Result:**
 ```python
@@ -92,22 +94,30 @@ class UnitCandidate(BaseModel):
     title: str
     description: str
     requirements: List[str]
-    line_range: Tuple[int, int]
+    line_range: Tuple[int, int]  # start_line, end_line from source
     dependencies: List[str]  # Other unit titles
-    estimated_complexity: str  # "low", "medium", "high"
 ```
 
 **Postconditions:**
-1. All units are identified
-2. Units cover entire specification
-3. No overlapping units
-4. Dependencies are mapped
+1. All units are identified with accurate line ranges
+2. Line numbers map exactly to markdown source
+3. Units cover entire specification
+4. No overlapping units
 
 ---
 
-### Capability 2.2: Generate Unit Files (Backend)
+### Capability 2.2: Linkage & Traceability Map
 
-**Goal:** Create unit markdown files and corresponding Dafny files for each identified unit.
+**Goal:** Provide the frontend with data to render "Ghost Links".
+
+**Data Structure:** TraceabilityMap (See section 3)
+
+**Logic:**
+When generating the `.dfy` file, create a UnitLink record that stores:
+- `root_file_id`: The big spec
+- `unit_file_id`: The small chunk
+- `dafny_file_id`: The code
+- `source_range`: `{ start: 10, end: 25 }`
 
 **Input:**
 - `source_file_id: UUID`
@@ -131,7 +141,7 @@ class UnitCandidate(BaseModel):
    e. Save both files to database:
       - Unit file: `{unit_id}.unit.md`
       - Dafny file: `{unit_id}.dfy`
-   f. Create unit link record
+   f. Create UnitLink record with source_range
 3. Update source file metadata (mark as deconstructed)
 
 **Validation:**
@@ -163,7 +173,42 @@ class DeconstructResponse(BaseModel):
 
 ---
 
-### Capability 2.3: Create Unit Links (Backend)
+### Capability 2.3: UI Visualization (Frontend)
+
+**Goal:** Render clickable badges on the Root Spec.
+
+**Logic:**
+1. **View Mode:** When viewing a Root Spec (`is_root=true`)
+2. **Fetch:** Get TraceabilityMap for this file
+3. **Render:**
+   - Display Markdown
+   - For each Link, calculate vertical offset based on `source_range.start_line`
+   - Render a floating `<Badge>` component in the margin or overlay: 🔗 [Unit: Auth]
+4. **Interaction:**
+   - Clicking the Badge splits the view and loads the corresponding `.dfy` file in the Right Pane
+
+**Validation:**
+- Root file must exist
+- TraceabilityMap must be available
+- Line numbers must be valid
+
+**Decision:**
+- If no links found: Show no badges
+- If successful: Display badges with correct positioning
+
+**Result:**
+- Badges visible on root spec
+- Clicking badge opens unit Dafny file
+- User can navigate between root and units
+
+**Postconditions:**
+1. Badges are positioned correctly based on line numbers
+2. Clicking badge opens correct Dafny file
+3. View is split appropriately
+
+---
+
+### Capability 2.4: Create Unit Links (Backend)
 
 **Goal:** Establish traceability between unit files and Dafny files.
 
@@ -206,7 +251,7 @@ class UnitLink(BaseModel):
 
 ---
 
-### Capability 2.4: Deconstruct API Endpoint (Backend)
+### Capability 2.5: Deconstruct API Endpoint (Backend)
 
 **Goal:** Expose deconstruction functionality via REST API.
 
@@ -270,7 +315,7 @@ class DeconstructStats(BaseModel):
 
 ---
 
-### Capability 2.5: Deconstruct UI Flow (Frontend)
+### Capability 2.6: Deconstruct UI Flow (Frontend)
 
 **Goal:** Provide user interface for deconstructing specifications.
 
@@ -322,11 +367,44 @@ class DeconstructStats(BaseModel):
 
 ---
 
-## 3. API Endpoint
+## 3. API Endpoints
 
-### Endpoint Specification
+### POST /api/deconstruct
 
-**POST /api/deconstruct**
+**Input:**
+```json
+{
+  "project_id": "...",
+  "source_file_id": "..."
+}
+```
+
+**Process:** Runs the AI analysis and generation loop.
+
+**Response:** 200 OK (Refreshes file tree)
+
+### GET /api/files/{file_id}/traceability
+
+**Input:** `root_file_id`
+
+**Response:**
+```json
+{
+  "source_file_id": "uuid-root",
+  "links": [
+    {
+      "unit_id": "uuid-1",
+      "dafny_file_id": "uuid-dfy-1",
+      "title": "Token Minting",
+      "source_range": {
+        "start_line": 12,
+        "end_line": 45
+      },
+      "status": "verified"
+    }
+  ]
+}
+```
 
 **Request:**
 ```json
@@ -376,20 +454,26 @@ class DeconstructStats(BaseModel):
 
 ---
 
-## 4. Database Schema
+## 4. Database Schema Updates
 
-### Unit Links Table
+### Table: unit_links
 
 ```python
-class UnitLink(BaseModel):
+class UnitLink(Base):
     __tablename__ = "unit_links"
     
-    link_id: str (UUID, primary key)
-    unit_file_id: str (foreign key to files)
-    dafny_file_id: str (foreign key to files)
-    source_file_id: str (foreign key to files)
-    link_type: str (default "unit-implementation")
-    created_at: datetime
+    id = Column(String(36), primary_key=True, default=uuid)
+    root_file_id = Column(String(36), ForeignKey('files.file_id'))
+    unit_file_id = Column(String(36), ForeignKey('files.file_id'))
+    dafny_file_id = Column(String(36), ForeignKey('files.file_id'))
+    
+    # Traceability Data
+    start_line = Column(Integer, nullable=False)
+    end_line = Column(Integer, nullable=False)
+    
+    # Metadata
+    title = Column(String(255))
+    verification_status = Column(Enum('verified', 'failed', 'unknown'), default='unknown')
 ```
 
 ### File Metadata Enhancement
@@ -489,6 +573,9 @@ parent_file_id: str | null (for units, points to root spec)
 - ✅ Links are correctly established
 - ✅ Deconstruction completes in < 30 seconds for typical spec
 - ✅ Partial failures don't corrupt data
+- [ ] **Line Mapping:** The AI-identified line numbers accurately match the markdown text (visual inspection)
+- [ ] **Navigation:** Clicking a link badge opens the correct `.dfy` file
+- [ ] **Isolation:** Deconstructing a file only affects that file and creates new sub-files; it does not overwrite the root
 
 ---
 

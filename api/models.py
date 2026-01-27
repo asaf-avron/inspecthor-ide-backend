@@ -4,6 +4,7 @@ Pydantic models for API request/response validation
 
 from pydantic import BaseModel
 from typing import List, Literal, Optional
+from datetime import datetime
 
 
 # === Stage 1-2: Generation Models ===
@@ -139,8 +140,8 @@ class ChatResponse(BaseModel):
 class FileSaveRequest(BaseModel):
     filename: str
     content: str
-    file_type: Literal["markdown", "dafny"]
-    project_id: Optional[str] = None
+    file_type: Literal["md", "dfy", "unit"]
+    project_id: str  # Required - files must belong to a project
 
 
 class FileSaveResponse(BaseModel):
@@ -150,11 +151,17 @@ class FileSaveResponse(BaseModel):
     size_bytes: int
 
 
+class FileUpdateRequest(BaseModel):
+    content: str
+    filename: Optional[str] = None  # Optional rename
+
+
 class FileResponse(BaseModel):
     file_id: str
     filename: str
     content: str
     file_type: str
+    project_id: str
     created_at: str
     updated_at: str
     size_bytes: int
@@ -172,6 +179,60 @@ class FileListItem(BaseModel):
 class FileListResponse(BaseModel):
     files: List[FileListItem]
     total: int
+
+
+# === Project Management Models ===
+class ProjectCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class ProjectUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class ProjectResponse(BaseModel):
+    project_id: str
+    name: str
+    description: Optional[str]
+    created_at: str
+    updated_at: str
+    file_count: int
+    redirect_url: Optional[str] = None
+
+
+class ProjectListRequest(BaseModel):
+    limit: int = 100
+    offset: int = 0
+    sort: Literal["created_at", "updated_at", "name"] = "updated_at"
+    order: Literal["asc", "desc"] = "desc"
+
+
+class ProjectListResponse(BaseModel):
+    projects: List[ProjectResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class FileMetadata(BaseModel):
+    file_id: str
+    filename: str
+    file_type: str
+    updated_at: str
+    size_bytes: int
+
+
+class ProjectStructureResponse(BaseModel):
+    project: ProjectResponse
+    files: List[FileMetadata]
+
+
+class ProjectDeleteResponse(BaseModel):
+    deleted: bool
+    project_id: str
+    files_deleted: int
 
 
 # === Verification Models (Enhanced) ===
@@ -220,3 +281,93 @@ class HealthResponse(BaseModel):
     status: str
     gemini_configured: bool
     dafny_available: bool
+
+
+# === Deconstruction Models ===
+class UnitCandidate(BaseModel):
+    title: str
+    description: str
+    requirements: List[str]
+    line_range: List[int]  # [start_line, end_line]
+    dependencies: List[str] = []
+
+
+class UnitInfo(BaseModel):
+    unit_id: str
+    unit_filename: str
+    dafny_filename: str
+    title: str
+    description: str
+    requirements: List[str]
+    dafny_code: str
+    line_range: List[int]  # [start_line, end_line]
+
+
+class UnitLinkInfo(BaseModel):
+    link_id: str
+    unit_file_id: str
+    dafny_file_id: str
+    source_file_id: str
+    link_type: str
+    title: str
+    source_range: dict  # {"start_line": int, "end_line": int}
+    verification_status: str
+    created_at: str
+
+
+class DeconstructStats(BaseModel):
+    total_units: int
+    successful_units: int
+    failed_units: int
+    total_files_created: int
+    processing_time_seconds: float
+
+
+class DeconstructRequest(BaseModel):
+    project_id: str
+    source_file_id: str
+    strategy: Literal["auto", "manual"] = "auto"
+    max_units: Optional[int] = None
+    unit_boundaries: Optional[List[List[int]]] = None  # [[start, end], ...]
+
+
+class DeconstructResponse(BaseModel):
+    units: List[UnitInfo]
+    links: List[UnitLinkInfo]
+    statistics: DeconstructStats
+    errors: List[str]
+
+
+class TraceabilityLink(BaseModel):
+    unit_id: str
+    dafny_file_id: str
+    title: str
+    source_range: dict  # {"start_line": int, "end_line": int}
+    status: str
+
+
+class TraceabilityResponse(BaseModel):
+    source_file_id: str
+    links: List[TraceabilityLink]
+
+
+# === Authentication Models ===
+class GitHubAuthResponse(BaseModel):
+    authorization_url: str
+
+
+class UserResponse(BaseModel):
+    user_id: str
+    github_id: int
+    github_login: str
+    email: Optional[str]
+    avatar_url: Optional[str]
+    tier: str
+    verification_credits: int
+    created_at: datetime
+    last_login_at: Optional[datetime]
+
+
+class TokenRefreshResponse(BaseModel):
+    access_token: str
+    expires_in: int
