@@ -1,5 +1,6 @@
-# Guardian Gateway - Full Stack Docker Compose
-# Includes: Backend API, Frontend IDE, PostgreSQL Database
+# Guardian Gateway - Backend Docker Compose
+# Includes: Backend API, PostgreSQL Database
+# Frontend runs locally via: cd ../v0-guardian-gateway-ide && pnpm run dev
 # Run with: docker-compose up --build
 
 version: '3.8'
@@ -31,7 +32,7 @@ services:
       dockerfile: Dockerfile.api
     container_name: guardian-api
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # Bind to localhost only - prevents internet scanners
     environment:
       # Database connection
       DATABASE_URL: postgresql://guardian:${DB_PASSWORD:-guardian_dev_password}@db:5432/guardian_gateway
@@ -44,8 +45,22 @@ services:
       # CORS - allow frontend
       CORS_ORIGINS: http://localhost:3000,http://frontend:3000
 
+      # URLs
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
+
       # Rate limiting
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+
+      # GitHub App Configuration
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-./github-app-private-key.pem}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_OAUTH_REDIRECT_URI: ${GITHUB_OAUTH_REDIRECT_URI:-http://localhost:3000/auth/github/callback}
+      USE_MOCK_GITHUB: ${USE_MOCK_GITHUB:-false}
     volumes:
       - .:/app
     depends_on:
@@ -53,27 +68,27 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Frontend IDE Service
-  frontend:
-    build:
-      context: ../v0-guardian-gateway-ide
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000
-    container_name: guardian-frontend
-    ports:
-      - "3000:3000"
-    environment:
-      # Point to backend API
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-      GUARDIAN_API_KEY: ${GUARDIAN_API_KEY:-dev_key_1}
-    volumes:
-      - ../v0-guardian-gateway-ide:/app
-      - /app/node_modules
-      - /app/.next
-    depends_on:
-      - api
-    restart: unless-stopped
+  # Frontend IDE Service - DISABLED (runs locally for faster HMR)
+  # To run frontend: cd ../v0-guardian-gateway-ide && pnpm run dev
+  # frontend:
+  #   build:
+  #     context: ../v0-guardian-gateway-ide
+  #     dockerfile: Dockerfile
+  #     args:
+  #       NEXT_PUBLIC_API_URL: http://localhost:8000
+  #   container_name: guardian-frontend
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     NEXT_PUBLIC_API_URL: http://localhost:8000
+  #     NEXT_PUBLIC_GUARDIAN_API_KEY: ${GUARDIAN_API_KEY:-dev_key_1}
+  #   volumes:
+  #     - ../v0-guardian-gateway-ide:/app
+  #     - /app/node_modules
+  #     - /app/.next
+  #   depends_on:
+  #     - api
+  #   restart: unless-stopped
 
 volumes:
   postgres_data:

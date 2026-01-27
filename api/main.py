@@ -3,8 +3,11 @@ Guardian Gateway - FastAPI Backend
 Main application entry point for the REST API
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 import sys
 import os
 import logging
@@ -34,15 +37,35 @@ from api.models import (
     TraceabilityEntry,
     SpecStatistics,
 )
-from api.middleware import APIKeyMiddleware, RateLimitMiddleware, RequestLoggingMiddleware
+from api.middleware import APIKeyMiddleware, RateLimitMiddleware, RequestLoggingMiddleware, SecurityScannerMiddleware
 from api.database import init_db
 from api import files
 from api import verification
+from api import deconstruct
+from api import projects
+from api import auth
+from api.github import webhooks as github_webhooks
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    try:
+        init_db()
+        logging.info("Database initialized")
+    except Exception as e:
+        logging.error(f"Database initialization failed: {e}")
+        raise
+    yield
+    # Shutdown (if needed)
+    pass
+
 
 app = FastAPI(
     title="Guardian Gateway API",
     description="REST API for formal specification verification",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS configuration - get allowed origins from environment
@@ -59,19 +82,32 @@ app.add_middleware(
 
 # Security middleware
 # Note: Middleware is applied in reverse order (last added = first executed)
+# Order: SecurityScannerMiddleware -> RequestLoggingMiddleware -> RateLimitMiddleware -> APIKeyMiddleware
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(RateLimitMiddleware, requests_per_minute=int(os.getenv("RATE_LIMIT_PER_MINUTE", "60")))
 app.add_middleware(APIKeyMiddleware)
+app.add_middleware(SecurityScannerMiddleware)  # Runs first - blocks scanners before they hit rate limiting
 
-# Initialize database on startup
-@app.on_event("startup")
-async def startup_event():
-    init_db()
-    logging.info("Database initialized")
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Log validation errors for debugging"""
+    body = await request.body()
+    logging.error(f"Validation error on {request.url.path}: {exc.errors()}")
+    logging.error(f"Request body: {body.decode('utf-8') if body else 'empty'}")
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
+
 
 # Include routers
+app.include_router(auth.router)
 app.include_router(files.router)
 app.include_router(verification.router)
+app.include_router(deconstruct.router)
+app.include_router(projects.router)
+app.include_router(github_webhooks.router)
 
 
 @app.get("/api/health", response_model=HealthResponse)
