@@ -22,11 +22,29 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies (including .NET dependencies)
 RUN apt-get update && apt-get install -y \
     postgresql-client \
     curl \
+    wget \
+    libc6 \
+    libgcc1 \
+    libgssapi-krb5-2 \
+    libicu-dev \
+    libssl3 \
+    libstdc++6 \
+    zlib1g \
     && rm -rf /var/lib/apt/lists/*
+
+# Install .NET 8.0 SDK (Dafny requires .NET)
+RUN wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh && \
+    chmod +x /tmp/dotnet-install.sh && \
+    /tmp/dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet && \
+    ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet && \
+    rm /tmp/dotnet-install.sh
+
+# Install Dafny as a .NET tool
+RUN dotnet tool install --global dafny
 
 # Copy Python packages from builder
 COPY --from=builder /root/.local /root/.local
@@ -37,8 +55,8 @@ COPY . .
 # Make sure scripts are executable
 RUN chmod +x scripts/*.sh || true
 
-# Add local bin to PATH
-ENV PATH=/root/.local/bin:$PATH
+# Add local bin and .NET tools to PATH
+ENV PATH=/root/.local/bin:/root/.dotnet/tools:$PATH
 
 # Expose port
 EXPOSE 8000

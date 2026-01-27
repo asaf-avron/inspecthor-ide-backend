@@ -22,32 +22,34 @@ This document provides a high-level roadmap for integrating the Guardian Gateway
 ### ✅ Backend Endpoints Available
 
 1. **Health Check** - `/api/health` ✅
-2. **Generate Spec** - `/api/generate/spec` ✅
-3. **Chat Assistant** - `/api/assistant/chat` ✅
-4. **File Operations:**
-   - Save - `/api/files/save` ✅
-   - Get - `/api/files/{file_id}` ✅
-   - List - `/api/files` ✅
-   - Delete - `/api/files/{file_id}` ✅
+2. **Project Management:**
+   - Create Project - `POST /api/projects` ✅
+   - List Projects - `GET /api/projects` ✅
+   - Get Project - `GET /api/projects/{project_id}` ✅
+   - Get Project Structure - `GET /api/projects/{project_id}/structure` ✅
+   - Update Project - `PUT /api/projects/{project_id}` ✅
+   - Delete Project - `DELETE /api/projects/{project_id}` ✅
+3. **File Operations:**
+   - Save - `POST /api/files/save` ✅
+   - Get - `GET /api/files/{file_id}` ✅
+   - Update - `PUT /api/files/{file_id}` ✅
+   - List - `GET /api/files` ✅
+   - Delete - `DELETE /api/files/{file_id}` ✅
+4. **Generate Spec** - `/api/generate/spec` ✅
 5. **Verification** - `/api/verify` ✅
+6. **Chat Assistant** - `/api/assistant/chat` ✅
 
 ### ❌ Missing Backend Endpoints
 
 1. **Deconstruct to Units** - `/api/deconstruct` (not implemented)
-2. **Project Management:**
-   - Create Project - `/api/projects` POST
-   - List Projects - `/api/projects` GET
-   - Get Project - `/api/projects/{project_id}` GET
-   - Delete Project - `/api/projects/{project_id}` DELETE
-3. **File Operations:**
-   - Update File - `/api/files/{file_id}` PUT/PATCH (currently only save creates new)
 
 ### ⚠️ Frontend Gaps
 
 1. **Project Management:**
-   - No project creation UI
-   - No project switching
-   - No project list view
+   - ✅ Project creation UI (dashboard)
+   - ✅ Project switching (project explorer dropdown)
+   - ✅ Project list view (dashboard)
+   - ✅ URL-based state recovery (`/app/[projectId]`)
    - Project ID not properly managed
 
 2. **File Operations:**
