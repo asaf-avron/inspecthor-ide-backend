@@ -17,12 +17,12 @@ module SpecGeneration {
     projectId: UUID,
     prompt: string,
     ownerId: UUID
-  ): (newState: SystemState, result: Result<UUID>)
+  ): (SystemState, Result<UUID>)
     requires ValidState(state)
     // [EXPERT: Add preconditions]
     // - Project exists and is owned by ownerId
     // - Prompt is non-empty
-    ensures ValidState(newState)
+    ensures ValidState(GenerateSpec(state, projectId, prompt, ownerId).0)
     // [EXPERT: Add postconditions]
     // - If Success, new spec file created
   {
@@ -36,10 +36,10 @@ module SpecGeneration {
     fileId: UUID,
     refinementPrompt: string,
     ownerId: UUID
-  ): (newState: SystemState, result: Result<UUID>)
+  ): (SystemState, Result<UUID>)
     requires ValidState(state)
     // [EXPERT: Add preconditions]
-    ensures ValidState(newState)
+    ensures ValidState(RefineSpec(state, fileId, refinementPrompt, ownerId).0)
     // [EXPERT: Add postconditions]
   {
     // [EXPERT: Implement full logic]
