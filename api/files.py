@@ -10,7 +10,7 @@ from typing import Optional
 import uuid
 from datetime import datetime
 
-from api.database import get_db, hash_api_key, File as DBFile, Project as DBProject
+from api.database import get_db, hash_api_key, File as DBFile, Project as DBProject, User
 from api.models import (
     FileSaveRequest,
     FileSaveResponse,
@@ -19,6 +19,7 @@ from api.models import (
     FileListResponse,
     FileListItem
 )
+from api.auth import get_current_user
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -43,22 +44,45 @@ def get_api_key_from_header(
     return "anon_default"
 
 
+def get_project_owner_filter(user: Optional[User] = None, api_key_hash_value: Optional[str] = None):
+    """
+    Get SQLAlchemy filter for project ownership.
+    Returns a filter that checks user_id (if authenticated) or api_key_hash (if anonymous).
+    For authenticated users, also checks api_key_hash to include projects created before user auth was implemented.
+    """
+    from sqlalchemy import or_
+    if user:
+        # Check both user_id and api_key_hash for authenticated users (migration support)
+        return or_(
+            DBProject.user_id == user.user_id,
+            DBProject.api_key_hash == api_key_hash_value
+        )
+    elif api_key_hash_value:
+        return DBProject.api_key_hash == api_key_hash_value
+    else:
+        # Should not happen, but return a filter that matches nothing
+        from sqlalchemy import false
+        return false()
+
+
 @router.post("/save", response_model=FileSaveResponse)
 async def save_file(
     request: FileSaveRequest,
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Save a specification or Dafny file.
-    Files must belong to a project owned by the API key.
+    Files must belong to a project owned by the authenticated user or API key.
     """
-    api_key_hash_value = hash_api_key(api_key)
+    api_key_hash_value = hash_api_key(api_key) if api_key else None
     
-    # Validate project exists and is owned by API key
+    # Validate project exists and is owned by user or API key
+    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
     project = db.query(DBProject).filter(
         DBProject.project_id == request.project_id,
-        DBProject.api_key_hash == api_key_hash_value
+        owner_filter
     ).first()
     
     if not project:
@@ -98,18 +122,20 @@ async def save_file(
 async def get_file(
     file_id: str,
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Load a file by ID.
-    Only returns files from projects owned by the requesting API key.
+    Only returns files from projects owned by the authenticated user or API key.
     """
-    api_key_hash_value = hash_api_key(api_key)
+    api_key_hash_value = hash_api_key(api_key) if api_key else None
     
     # Join with project to verify ownership
+    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
     db_file = db.query(DBFile).join(DBProject).filter(
         DBFile.file_id == file_id,
-        DBProject.api_key_hash == api_key_hash_value
+        owner_filter
     ).first()
     
     if not db_file:
@@ -123,7 +149,8 @@ async def get_file(
         project_id=str(db_file.project_id),
         created_at=db_file.created_at.isoformat(),
         updated_at=db_file.updated_at.isoformat(),
-        size_bytes=len(db_file.content.encode('utf-8'))
+        size_bytes=len(db_file.content.encode('utf-8')),
+        renamed=db_file.renamed
     )
 
 
@@ -132,18 +159,18 @@ async def list_files(
     project_id: Optional[str] = None,
     file_type: Optional[str] = None,
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
-    List all files from projects owned by the requesting API key.
+    List all files from projects owned by the authenticated user or API key.
     Optionally filter by project_id and file_type.
     """
-    api_key_hash_value = hash_api_key(api_key)
+    api_key_hash_value = hash_api_key(api_key) if api_key else None
     
     # Join with project to verify ownership
-    query = db.query(DBFile).join(DBProject).filter(
-        DBProject.api_key_hash == api_key_hash_value
-    )
+    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
+    query = db.query(DBFile).join(DBProject).filter(owner_filter)
     
     if project_id:
         query = query.filter(DBFile.project_id == project_id)
@@ -175,19 +202,21 @@ async def update_file(
     file_id: str,
     request: FileUpdateRequest,
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Update file content atomically.
     Optionally rename file if filename is provided.
-    Only updates files from projects owned by the requesting API key.
+    Only updates files from projects owned by the authenticated user or API key.
     """
-    api_key_hash_value = hash_api_key(api_key)
+    api_key_hash_value = hash_api_key(api_key) if api_key else None
     
     # Join with project to verify ownership
+    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
     db_file = db.query(DBFile).join(DBProject).filter(
         DBFile.file_id == file_id,
-        DBProject.api_key_hash == api_key_hash_value
+        owner_filter
     ).first()
     
     if not db_file:
@@ -208,6 +237,7 @@ async def update_file(
             raise HTTPException(status_code=409, detail="Filename already exists in this project")
         
         db_file.filename = request.filename
+        db_file.renamed = True  # Mark file as manually renamed
     
     # updated_at is auto-updated by SQLAlchemy
     db.commit()
@@ -221,7 +251,8 @@ async def update_file(
         project_id=str(db_file.project_id),
         created_at=db_file.created_at.isoformat(),
         updated_at=db_file.updated_at.isoformat(),
-        size_bytes=len(db_file.content.encode('utf-8'))
+        size_bytes=len(db_file.content.encode('utf-8')),
+        renamed=db_file.renamed
     )
 
 
@@ -229,18 +260,20 @@ async def update_file(
 async def delete_file(
     file_id: str,
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Delete a file by ID.
-    Only deletes files from projects owned by the requesting API key.
+    Only deletes files from projects owned by the authenticated user or API key.
     """
-    api_key_hash_value = hash_api_key(api_key)
+    api_key_hash_value = hash_api_key(api_key) if api_key else None
     
     # Join with project to verify ownership
+    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
     db_file = db.query(DBFile).join(DBProject).filter(
         DBFile.file_id == file_id,
-        DBProject.api_key_hash == api_key_hash_value
+        owner_filter
     ).first()
     
     if not db_file:
