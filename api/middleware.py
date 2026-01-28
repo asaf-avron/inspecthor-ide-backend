@@ -27,6 +27,8 @@ class SecurityScannerMiddleware(BaseHTTPMiddleware):
         self.allowed_paths = {
             "/api/health",
             "/api/generate/spec",
+            "/api/generate/find-gaps",
+            "/api/generate/refine-spec",
             "/api/verify/dafny",
             "/api/assistant/chat",
             "/api/files",
@@ -195,10 +197,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     Simple rate limiting middleware based on IP address.
     Limits requests per minute per IP.
-    Excludes health checks and public endpoints from rate limiting.
+    Excludes health checks, public endpoints, and localhost from rate limiting.
     """
     
-    def __init__(self, app, requests_per_minute: int = 60):
+    def __init__(self, app, requests_per_minute: int = 300):
         super().__init__(app)
         self.requests_per_minute = requests_per_minute
         self.request_counts = defaultdict(list)
@@ -210,6 +212,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "/redoc",
             "/openapi.json",
         }
+        
+        # IPs excluded from rate limiting (localhost for development)
+        self.excluded_ips = {
+            "127.0.0.1",
+            "localhost",
+            "::1",
+        }
+    
+    def _is_localhost(self, client_ip: str) -> bool:
+        """Check if client IP is localhost."""
+        return client_ip in self.excluded_ips or client_ip.startswith("127.") or client_ip.startswith("::1")
     
     async def dispatch(self, request: Request, call_next):
         client_ip = request.client.host
@@ -217,6 +230,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         
         # Skip rate limiting for excluded paths
         if path in self.excluded_paths:
+            return await call_next(request)
+        
+        # Skip rate limiting for localhost (development)
+        if self._is_localhost(client_ip):
+            return await call_next(request)
+        
+        # Skip rate limiting for authenticated users (they have API keys or JWT tokens)
+        # Check for API key or JWT token
+        has_api_key = request.headers.get("X-API-Key")
+        has_jwt = request.cookies.get("access_token")
+        if has_api_key or has_jwt:
             return await call_next(request)
         
         now = datetime.now()
@@ -229,7 +253,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         
         # Check rate limit
         if len(self.request_counts[client_ip]) >= self.requests_per_minute:
-            # Don't log rate limit hits to reduce noise from scanners
+            logger.warning(
+                f"Rate limit exceeded for {client_ip}: {len(self.request_counts[client_ip])} requests in the last minute"
+            )
             return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 content={

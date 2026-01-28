@@ -55,8 +55,11 @@ class UnitIdentifier:
     """
     
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize with Gemini API key"""
-        self.auditor = SpecAuditor(api_key=api_key)
+        """
+        Initialize with Gemini API key.
+        Note: api_key parameter is deprecated - uses GEMINI_API_KEY from environment.
+        """
+        self.auditor = SpecAuditor()  # Uses GEMINI_API_KEY from environment
         
     def identify_units(self, markdown_content: str) -> List[UnitCandidate]:
         """
@@ -200,7 +203,7 @@ def extract_content_by_lines(content: str, start_line: int, end_line: int) -> st
     return "\n".join(lines[start_idx:end_idx])
 
 
-def create_unit_filename(index: int, title: str, extension: str) -> str:
+def create_unit_filename(index: int, title: str, extension: str, subfolder_prefix: str = "") -> str:
     """
     Create filename for unit file.
     
@@ -208,14 +211,18 @@ def create_unit_filename(index: int, title: str, extension: str) -> str:
         index: Sequential unit number (1-indexed)
         title: Unit title
         extension: File extension (.unit.md or .dfy)
+        subfolder_prefix: Optional subfolder path prefix (e.g., "spec-units")
         
     Returns:
-        Formatted filename
+        Formatted filename with optional subfolder path
     """
     # Slugify title
     slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
     slug = slug[:50]  # Limit length
-    return f"unit-{index:03d}-{slug}{extension}"
+    filename = f"unit-{index:03d}-{slug}{extension}"
+    if subfolder_prefix:
+        return f"{subfolder_prefix}/{filename}"
+    return filename
 
 
 @router.post("/deconstruct", response_model=DeconstructResponse)
@@ -255,9 +262,9 @@ async def deconstruct_specification(
             detail="Only markdown files can be deconstructed"
         )
     
-    # Initialize unit identifier
-    identifier = UnitIdentifier(api_key=api_key)
-    auditor = SpecAuditor(api_key=api_key)
+    # Initialize unit identifier (uses GEMINI_API_KEY from environment)
+    identifier = UnitIdentifier()
+    auditor = SpecAuditor()
     
     if not auditor.is_configured():
         raise HTTPException(

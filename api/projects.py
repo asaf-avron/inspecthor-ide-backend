@@ -10,7 +10,7 @@ from typing import Optional
 from datetime import datetime
 import logging
 
-from api.database import get_db, hash_api_key, Project as DBProject, File as DBFile
+from api.database import get_db, hash_api_key, Project as DBProject, File as DBFile, User
 from api.models import (
     ProjectCreateRequest,
     ProjectUpdateRequest,
@@ -21,6 +21,7 @@ from api.models import (
     ProjectDeleteResponse,
     FileMetadata,
 )
+from api.auth import get_current_user
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -50,11 +51,64 @@ def get_api_key_from_header(
     return "anon_default"
 
 
+def get_project_owner_id(
+    user: Optional[User] = None,
+    api_key: Optional[str] = None,
+    db: Optional[Session] = None
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Get project owner identifier (user_id or api_key_hash).
+    Returns (user_id, api_key_hash) tuple - one will be None.
+    Prioritizes authenticated user over API key.
+    """
+    if user:
+        return (str(user.user_id), None)
+    
+    if api_key:
+        api_key_hash_value = hash_api_key(api_key)
+        return (None, api_key_hash_value)
+    
+    return (None, None)
+
+
+def migrate_anonymous_projects_to_user(
+    user: User,
+    api_key_hash_value: str,
+    db: Session
+) -> int:
+    """
+    Migrate anonymous projects (created with api_key_hash) to authenticated user.
+    This happens when a user logs in and has projects created before authentication.
+    Returns the number of projects migrated.
+    """
+    # Find projects that match the current session's api_key_hash but don't have a user_id
+    # These are projects created anonymously before the user logged in
+    projects_to_migrate = db.query(DBProject).filter(
+        DBProject.api_key_hash == api_key_hash_value,
+        DBProject.user_id.is_(None)
+    ).all()
+    
+    if not projects_to_migrate:
+        return 0
+    
+    # Migrate them to the authenticated user
+    migrated_count = 0
+    for project in projects_to_migrate:
+        project.user_id = user.user_id
+        # Keep api_key_hash for backward compatibility, but user_id takes precedence
+        migrated_count += 1
+    
+    db.commit()
+    logger.info(f"Migrated {migrated_count} anonymous projects to user {user.user_id}")
+    return migrated_count
+
+
 @router.post("/", response_model=ProjectResponse, status_code=201)
 async def create_project(
     request: ProjectCreateRequest,
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Create a new project and bootstrap initial README.md file.
@@ -63,9 +117,9 @@ async def create_project(
     import logging
     logger = logging.getLogger(__name__)
     
-    api_key_hash_value = hash_api_key(api_key)
+    user_id, api_key_hash_value = get_project_owner_id(current_user, api_key, db)
     
-    logger.info(f"Creating project: name='{request.name}', description length={len(request.description) if request.description else 0}")
+    logger.info(f"Creating project: name='{request.name}', user_id={user_id}, api_key_hash={api_key_hash_value[:20] if api_key_hash_value else None}")
     
     # Validate name - Pydantic should handle None, but check for empty string
     if not request.name:
@@ -81,11 +135,14 @@ async def create_project(
         logger.warning(f"Project name too long: {len(name_trimmed)} characters")
         raise HTTPException(status_code=400, detail="Invalid name length (1-255 characters)")
     
-    # Check for existing project (case-insensitive)
-    existing = db.query(DBProject).filter(
-        DBProject.api_key_hash == api_key_hash_value,
-        func.lower(DBProject.name) == name_trimmed.lower()
-    ).first()
+    # Check for existing project (case-insensitive) - check by user_id or api_key_hash
+    query = db.query(DBProject).filter(func.lower(DBProject.name) == name_trimmed.lower())
+    if user_id:
+        query = query.filter(DBProject.user_id == user_id)
+    else:
+        query = query.filter(DBProject.api_key_hash == api_key_hash_value)
+    
+    existing = query.first()
     
     if existing:
         logger.warning(f"Duplicate project name: '{name_trimmed}'")
@@ -100,6 +157,7 @@ async def create_project(
     project = DBProject(
         name=name_trimmed,
         description=request.description,
+        user_id=user_id,
         api_key_hash=api_key_hash_value
     )
     db.add(project)
@@ -124,15 +182,25 @@ async def list_projects(
     sort: str = Query("updated_at", pattern="^(created_at|updated_at|name)$"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
-    List all projects owned by the requesting API key with pagination and sorting.
+    List all projects owned by the authenticated user or API key with pagination and sorting.
+    Automatically migrates anonymous projects to authenticated user on first access.
     """
-    api_key_hash_value = hash_api_key(api_key)
+    user_id, api_key_hash_value = get_project_owner_id(current_user, api_key, db)
     
-    # Base query: only projects owned by this API key
-    query = db.query(DBProject).filter(DBProject.api_key_hash == api_key_hash_value)
+    # Migrate anonymous projects to authenticated user if logged in
+    if current_user and api_key_hash_value:
+        migrate_anonymous_projects_to_user(current_user, api_key_hash_value, db)
+    
+    # Base query: filter by user_id (if authenticated) or api_key_hash (if anonymous)
+    query = db.query(DBProject)
+    if user_id:
+        query = query.filter(DBProject.user_id == user_id)
+    else:
+        query = query.filter(DBProject.api_key_hash == api_key_hash_value)
     
     # Count total before pagination
     total = query.count()
@@ -172,22 +240,44 @@ async def list_projects(
 async def get_project_structure(
     project_id: str,
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Get project metadata AND file tree in one RTT (Round Trip Time).
     Optimized to prevent waterfall loading in frontend.
+    Automatically migrates anonymous projects to authenticated user on access.
     """
-    api_key_hash_value = hash_api_key(api_key)
+    user_id, api_key_hash_value = get_project_owner_id(current_user, api_key, db)
+    
+    # Migrate anonymous projects to authenticated user if logged in
+    if current_user and api_key_hash_value:
+        migrate_anonymous_projects_to_user(current_user, api_key_hash_value, db)
     
     # Load project with ownership check
-    project = db.query(DBProject).filter(
-        DBProject.project_id == project_id,
-        DBProject.api_key_hash == api_key_hash_value
-    ).first()
+    query = db.query(DBProject).filter(DBProject.project_id == project_id)
+    if user_id:
+        # Check both user_id and api_key_hash (for projects being migrated)
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                DBProject.user_id == user_id,
+                DBProject.api_key_hash == api_key_hash_value
+            )
+        )
+    else:
+        query = query.filter(DBProject.api_key_hash == api_key_hash_value)
+    
+    project = query.first()
     
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    
+    # If project was found via api_key_hash but user is authenticated, migrate it now
+    if current_user and project.user_id is None and project.api_key_hash == api_key_hash_value:
+        project.user_id = current_user.user_id
+        db.commit()
+        db.refresh(project)
     
     # Load all files in one query
     files = db.query(DBFile).filter(
@@ -220,20 +310,41 @@ async def get_project_structure(
 async def get_project(
     project_id: str,
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Get single project details.
+    Automatically migrates anonymous projects to authenticated user on access.
     """
-    api_key_hash_value = hash_api_key(api_key)
+    user_id, api_key_hash_value = get_project_owner_id(current_user, api_key, db)
     
-    project = db.query(DBProject).filter(
-        DBProject.project_id == project_id,
-        DBProject.api_key_hash == api_key_hash_value
-    ).first()
+    # Migrate anonymous projects to authenticated user if logged in
+    if current_user and api_key_hash_value:
+        migrate_anonymous_projects_to_user(current_user, api_key_hash_value, db)
+    
+    query = db.query(DBProject).filter(DBProject.project_id == project_id)
+    if user_id:
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                DBProject.user_id == user_id,
+                DBProject.api_key_hash == api_key_hash_value
+            )
+        )
+    else:
+        query = query.filter(DBProject.api_key_hash == api_key_hash_value)
+    
+    project = query.first()
     
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    
+    # If project was found via api_key_hash but user is authenticated, migrate it now
+    if current_user and project.user_id is None and project.api_key_hash == api_key_hash_value:
+        project.user_id = current_user.user_id
+        db.commit()
+        db.refresh(project)
     
     file_count = db.query(DBFile).filter(DBFile.project_id == project_id).count()
     
@@ -252,21 +363,42 @@ async def update_project(
     project_id: str,
     request: ProjectUpdateRequest,
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Update project name and/or description (partial update).
+    Automatically migrates anonymous projects to authenticated user on access.
     """
-    api_key_hash_value = hash_api_key(api_key)
+    user_id, api_key_hash_value = get_project_owner_id(current_user, api_key, db)
+    
+    # Migrate anonymous projects to authenticated user if logged in
+    if current_user and api_key_hash_value:
+        migrate_anonymous_projects_to_user(current_user, api_key_hash_value, db)
     
     # Load project with ownership check
-    project = db.query(DBProject).filter(
-        DBProject.project_id == project_id,
-        DBProject.api_key_hash == api_key_hash_value
-    ).first()
+    query = db.query(DBProject).filter(DBProject.project_id == project_id)
+    if user_id:
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                DBProject.user_id == user_id,
+                DBProject.api_key_hash == api_key_hash_value
+            )
+        )
+    else:
+        query = query.filter(DBProject.api_key_hash == api_key_hash_value)
+    
+    project = query.first()
     
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    
+    # If project was found via api_key_hash but user is authenticated, migrate it now
+    if current_user and project.user_id is None and project.api_key_hash == api_key_hash_value:
+        project.user_id = current_user.user_id
+        db.commit()
+        db.refresh(project)
     
     # Validate at least one field is provided
     if request.name is None and request.description is None:
@@ -278,11 +410,16 @@ async def update_project(
             raise HTTPException(status_code=400, detail="Invalid name length (1-255 characters)")
         
         if request.name != project.name:
-            existing = db.query(DBProject).filter(
-                DBProject.api_key_hash == api_key_hash_value,
+            existing_query = db.query(DBProject).filter(
                 func.lower(DBProject.name) == request.name.lower(),
                 DBProject.project_id != project_id
-            ).first()
+            )
+            if user_id:
+                existing_query = existing_query.filter(DBProject.user_id == user_id)
+            else:
+                existing_query = existing_query.filter(DBProject.api_key_hash == api_key_hash_value)
+            
+            existing = existing_query.first()
             
             if existing:
                 raise HTTPException(status_code=400, detail="Project name already exists")
@@ -316,18 +453,33 @@ async def update_project(
 async def delete_project(
     project_id: str,
     api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Delete a project and all associated files and unit links atomically (cascade).
+    Automatically migrates anonymous projects to authenticated user before deletion.
     """
-    api_key_hash_value = hash_api_key(api_key)
+    user_id, api_key_hash_value = get_project_owner_id(current_user, api_key, db)
+    
+    # Migrate anonymous projects to authenticated user if logged in
+    if current_user and api_key_hash_value:
+        migrate_anonymous_projects_to_user(current_user, api_key_hash_value, db)
     
     # Load project with ownership check
-    project = db.query(DBProject).filter(
-        DBProject.project_id == project_id,
-        DBProject.api_key_hash == api_key_hash_value
-    ).first()
+    query = db.query(DBProject).filter(DBProject.project_id == project_id)
+    if user_id:
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                DBProject.user_id == user_id,
+                DBProject.api_key_hash == api_key_hash_value
+            )
+        )
+    else:
+        query = query.filter(DBProject.api_key_hash == api_key_hash_value)
+    
+    project = query.first()
     
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
