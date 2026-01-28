@@ -25,7 +25,7 @@ module Traceability {
     dafnyFileId: UUID,
     startLine: nat,
     endLine: nat
-  ): (newState: SystemStateWithLinks, result: bool)
+  ): (SystemStateWithLinks, bool)
     requires ValidState(state.state)
     // [EXPERT: Add preconditions]
     // - All file IDs exist
@@ -33,7 +33,7 @@ module Traceability {
     // - unitFileId is UNIT type
     // - dafnyFileId is DFY type
     // - Line numbers are valid
-    ensures ValidState(newState.state)
+    ensures ValidState(CreateTraceabilityLink(state, rootFileId, unitFileId, dafnyFileId, startLine, endLine).0.state)
     // [EXPERT: Add postconditions]
   {
     // [EXPERT: Implement full logic]
