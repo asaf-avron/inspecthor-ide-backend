@@ -37,7 +37,7 @@ jobs:
       - name: Verify Dafny specifications
         run: |
           # Verify all Dafny files in api/verification/
-          docker compose run --rm --no-build api bash -c "cd /app && dafny verify --solver-path=/root/.dotnet/tools/z3/bin/z3-4.12.1 --allow-warnings api/verification/*.dfy"
+          docker run --rm -v "${{ github.workspace }}:/app" -w /app guardian-gateway-api:latest bash -c "dafny verify --solver-path=/root/.dotnet/tools/z3/bin/z3-4.12.1 --allow-warnings api/verification/*.dfy"
       
       - name: Check verification results
         if: failure()
