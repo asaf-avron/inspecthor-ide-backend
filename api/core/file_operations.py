@@ -6,7 +6,7 @@ See: api/verification/file_operations.dfy :: FileOperations
 """
 
 import icontract
-from api.core.models import SystemState, File, FileType, Result, Owner
+from api.core.models import SystemState, File, FileType, Result, Owner, Project
 
 
 def _filename_unique(state: SystemState, project_id: str, filename: str) -> bool:
@@ -128,7 +128,7 @@ def save_file_core(
     new_state = SystemState(projects=new_projects, files=new_files)
     new_state.validate()
     
-    return (new_state, Result.success(new_file_id))
+    return (new_state, Result.ok(new_file_id))
 
 
 @icontract.require(
@@ -201,7 +201,7 @@ def update_file_core(
     new_state = SystemState(projects=state.projects, files=new_files)
     new_state.validate()
     
-    return (new_state, Result.success(file_id))
+    return (new_state, Result.ok(file_id))
 
 
 @icontract.require(
@@ -263,4 +263,4 @@ def delete_file_core(
     new_state = SystemState(projects=new_projects, files=new_files)
     new_state.validate()
     
-    return (new_state, Result.success(True))
+    return (new_state, Result.ok(True))

@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
 from typing import Optional
 import uuid
-from datetime import datetime
 import icontract
 
 from api.database import get_db, hash_api_key, File as DBFile, Project as DBProject, User
@@ -21,6 +20,9 @@ from api.models import (
     FileListItem
 )
 from api.auth import get_current_user
+from api.core import adapters
+from api.core.models import FileType
+from api.core import file_operations
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -166,9 +168,11 @@ async def save_file(
     # Load created file for response
     db_file = db.query(DBFile).filter(DBFile.file_id == new_file_id).first()
     
+    if not db_file:
+        raise HTTPException(status_code=404, detail="File not found")
     return FileSaveResponse(
         file_id=str(db_file.file_id),
-        filename=db_file.filename,
+        filename=str(db_file.filename),  # type: ignore[arg-type]
         saved_at=db_file.created_at.isoformat(),
         size_bytes=len(request.content.encode('utf-8'))
     )
@@ -199,14 +203,14 @@ async def get_file(
     
     return FileResponse(
         file_id=str(db_file.file_id),
-        filename=db_file.filename,
-        content=db_file.content,
-        file_type=db_file.file_type,
+        filename=str(db_file.filename),  # type: ignore[arg-type]
+        content=str(db_file.content),  # type: ignore[arg-type]
+        file_type=str(db_file.file_type),  # type: ignore[arg-type]
         project_id=str(db_file.project_id),
         created_at=db_file.created_at.isoformat(),
         updated_at=db_file.updated_at.isoformat(),
         size_bytes=len(db_file.content.encode('utf-8')),
-        renamed=db_file.renamed
+        renamed=bool(db_file.renamed)  # type: ignore[arg-type]
     )
 
 
@@ -238,8 +242,8 @@ async def list_files(
     file_items = [
         FileListItem(
             file_id=str(f.file_id),
-            filename=f.filename,
-            file_type=f.file_type,
+            filename=str(f.filename),  # type: ignore[arg-type]
+            file_type=str(f.file_type),  # type: ignore[arg-type]
             size_bytes=len(f.content.encode('utf-8')),
             created_at=f.created_at.isoformat(),
             updated_at=f.updated_at.isoformat()
@@ -327,14 +331,14 @@ async def update_file(
     
     return FileResponse(
         file_id=str(db_file.file_id),
-        filename=db_file.filename,
-        content=db_file.content,
-        file_type=db_file.file_type,
+        filename=str(db_file.filename),  # type: ignore[arg-type]
+        content=str(db_file.content),  # type: ignore[arg-type]
+        file_type=str(db_file.file_type),  # type: ignore[arg-type]
         project_id=str(db_file.project_id),
         created_at=db_file.created_at.isoformat(),
         updated_at=db_file.updated_at.isoformat(),
         size_bytes=len(db_file.content.encode('utf-8')),
-        renamed=db_file.renamed
+        renamed=bool(db_file.renamed)  # type: ignore[arg-type]
     )
 
 

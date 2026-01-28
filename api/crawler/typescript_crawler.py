@@ -3,7 +3,7 @@ TypeScript/JavaScript Crawler for InSpecThor.
 Uses tree-sitter for AST parsing and execution slice extraction.
 """
 
-from typing import Callable, List, Dict, Set, Optional
+from typing import Callable, List, Dict, Set, Optional, Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -99,7 +99,7 @@ class TypeScriptCrawler:
         
         return '\n'.join(function_lines) if function_lines else f"// Function {function_name} not found"
     
-    def detect_pure_functions(self, source: str) -> List[Dict[str, any]]:
+    def detect_pure_functions(self, source: str) -> List[Dict[str, Any]]:
         """
         Detect pure functions suitable for auto-anchoring.
         

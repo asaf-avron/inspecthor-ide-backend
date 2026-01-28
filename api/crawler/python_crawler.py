@@ -4,7 +4,7 @@ Extracts execution slices from Python code using static analysis.
 """
 
 import ast
-from typing import Callable, List, Dict, Set, Optional
+from typing import Callable, List, Dict, Set, Optional, Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -244,7 +244,7 @@ class PythonCrawler:
         # External 3rd party
         return f"axiom {{:extern}} function {function_name}(...): ?"
     
-    def detect_pure_functions(self, source: str) -> List[Dict[str, any]]:
+    def detect_pure_functions(self, source: str) -> List[Dict[str, Any]]:
         """
         Detect pure functions suitable for auto-anchoring (Brownfield Scanner).
         

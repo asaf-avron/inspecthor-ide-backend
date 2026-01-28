@@ -5,9 +5,8 @@ Provides structured interface for running Dafny verification from Python code.
 
 import subprocess
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from pathlib import Path
-import json
 
 logger = logging.getLogger(__name__)
 
