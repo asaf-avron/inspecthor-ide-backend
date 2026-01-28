@@ -67,7 +67,12 @@ module ProjectManagement {
     // 3. Remove project
     var newProjects := map pid | pid in s.projects && pid != projectId :: s.projects[pid];
     
-    (SystemState(newProjects, newFiles), Success(true))
+    var newState := SystemState(newProjects, newFiles);
+    
+    // Prove ValidState using helper lemma
+    ValidStateAfterProjectDeletion(s, projectId, newFiles, newProjects);
+
+    (newState, Success(true))
   }
 
   // --- Test Vectors (JSON Output) ---
