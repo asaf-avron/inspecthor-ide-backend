@@ -24,6 +24,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
+      - name: Debug cache info
+        run: |
+          echo "Current branch: ${{ github.ref }}"
+          echo "Build context files changed:"
+          git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "First commit or no previous commit"
+      
       - name: Build and Cache API Image
         uses: docker/build-push-action@v6
         with:
