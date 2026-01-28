@@ -3,11 +3,12 @@ API Security Middleware for Guardian Gateway
 Provides authentication, rate limiting, and request logging
 """
 
-from fastapi import Request, HTTPException, status
+from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from datetime import datetime, timedelta
 from collections import defaultdict
+from typing import Optional, Dict, List
 import os
 import logging
 
@@ -27,6 +28,8 @@ class SecurityScannerMiddleware(BaseHTTPMiddleware):
         self.allowed_paths = {
             "/api/health",
             "/api/generate/spec",
+            "/api/generate/find-gaps",
+            "/api/generate/refine-spec",
             "/api/verify/dafny",
             "/api/assistant/chat",
             "/api/files",
@@ -71,11 +74,15 @@ class SecurityScannerMiddleware(BaseHTTPMiddleware):
     
     def _is_allowed_path(self, path: str) -> bool:
         """Check if path is a legitimate API endpoint."""
-        # Check exact matches
+        # ALLOW ALL API ENDPOINTS
+        if path.startswith("/api/"):
+            return True
+        
+        # Check exact matches for non-API paths (docs, health, etc.)
         if path in self.allowed_paths:
             return True
         
-        # Check if it starts with an allowed API prefix
+        # Check if it starts with an allowed non-API prefix
         for allowed in self.allowed_paths:
             if path.startswith(allowed):
                 return True
@@ -114,9 +121,10 @@ class SecurityScannerMiddleware(BaseHTTPMiddleware):
         is_suspicious, reason = self._is_suspicious(request)
         
         if is_suspicious:
+            client_host = request.client.host if request.client else "unknown"
             logger.warning(
                 f"[SECURITY] Blocked scanner request: {request.method} {request.url.path} "
-                f"from {request.client.host} - Reason: {reason}"
+                f"from {client_host} - Reason: {reason}"
             )
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -132,7 +140,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     Supports both authentication methods for backward compatibility.
     """
     
-    def __init__(self, app, allowed_keys: list[str] = None):
+    def __init__(self, app, allowed_keys: Optional[list[str]] = None):
         super().__init__(app)
         # Get allowed API keys from environment variable
         env_keys = os.getenv("ALLOWED_API_KEYS", "")
@@ -175,7 +183,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         api_key = request.headers.get("X-API-Key")
         if api_key:
             if api_key not in self.allowed_keys:
-                logger.warning(f"Invalid API key attempt from {request.client.host}")
+                client_host = request.client.host if request.client else "unknown"
+                logger.warning(f"Invalid API key attempt from {client_host}")
                 return JSONResponse(
                     status_code=status.HTTP_403_FORBIDDEN,
                     content={"detail": "Invalid API key"}
@@ -186,7 +195,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         # ANONYMOUS ACCESS: Allow local-first usage without authentication
         # GitHub operations will be blocked at the endpoint level if not authenticated
         # This enables the "lazy authentication" pattern
-        logger.debug(f"Anonymous request from {request.client.host} to {request.url.path}")
+        client_host = request.client.host if request.client else "unknown"
+        logger.debug(f"Anonymous request from {client_host} to {request.url.path}")
         response = await call_next(request)
         return response
 
@@ -195,13 +205,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     Simple rate limiting middleware based on IP address.
     Limits requests per minute per IP.
-    Excludes health checks and public endpoints from rate limiting.
+    Excludes health checks, public endpoints, and localhost from rate limiting.
     """
     
-    def __init__(self, app, requests_per_minute: int = 60):
+    def __init__(self, app, requests_per_minute: int = 300):
         super().__init__(app)
         self.requests_per_minute = requests_per_minute
-        self.request_counts = defaultdict(list)
+        self.request_counts: Dict[str, List[datetime]] = defaultdict(list)
         
         # Endpoints excluded from rate limiting
         self.excluded_paths = {
@@ -210,13 +220,35 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "/redoc",
             "/openapi.json",
         }
+        
+        # IPs excluded from rate limiting (localhost for development)
+        self.excluded_ips = {
+            "127.0.0.1",
+            "localhost",
+            "::1",
+        }
+    
+    def _is_localhost(self, client_ip: str) -> bool:
+        """Check if client IP is localhost."""
+        return client_ip in self.excluded_ips or client_ip.startswith("127.") or client_ip.startswith("::1")
     
     async def dispatch(self, request: Request, call_next):
-        client_ip = request.client.host
+        client_ip = request.client.host if request.client else "unknown"
         path = request.url.path
         
         # Skip rate limiting for excluded paths
         if path in self.excluded_paths:
+            return await call_next(request)
+        
+        # Skip rate limiting for localhost (development)
+        if self._is_localhost(client_ip):
+            return await call_next(request)
+        
+        # Skip rate limiting for authenticated users (they have API keys or JWT tokens)
+        # Check for API key or JWT token
+        has_api_key = request.headers.get("X-API-Key")
+        has_jwt = request.cookies.get("access_token")
+        if has_api_key or has_jwt:
             return await call_next(request)
         
         now = datetime.now()
@@ -229,7 +261,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         
         # Check rate limit
         if len(self.request_counts[client_ip]) >= self.requests_per_minute:
-            # Don't log rate limit hits to reduce noise from scanners
+            logger.warning(
+                f"Rate limit exceeded for {client_ip}: {len(self.request_counts[client_ip])} requests in the last minute"
+            )
             return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 content={
@@ -255,21 +289,34 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         
         # Skip logging for health checks (too noisy)
         if path == "/api/health":
-            response = await call_next(request)
-            return response
+            try:
+                response = await call_next(request)
+                return response
+            except Exception as e:
+                logger.error(f"Exception in health check: {e}", exc_info=True)
+                raise
         
         # Log request
-        logger.info(f"Request: {request.method} {path} from {request.client.host}")
+        client_host = request.client.host if request.client else "unknown"
+        logger.info(f"Request: {request.method} {path} from {client_host}")
         
-        response = await call_next(request)
-        
-        # Log all responses including 429 (but scanners should be blocked earlier by SecurityScannerMiddleware)
-        
-        # Log response
-        duration = (datetime.now() - start_time).total_seconds()
-        logger.info(
-            f"Response: {request.method} {path} "
-            f"status={response.status_code} duration={duration:.3f}s"
-        )
-        
-        return response
+        try:
+            response = await call_next(request)
+            
+            # Log response
+            duration = (datetime.now() - start_time).total_seconds()
+            logger.info(
+                f"Response: {request.method} {path} "
+                f"status={response.status_code} duration={duration:.3f}s"
+            )
+            
+            return response
+        except Exception as e:
+            # Log exception before re-raising (will be caught by global exception handler)
+            duration = (datetime.now() - start_time).total_seconds()
+            logger.error(
+                f"Exception in {request.method} {path} after {duration:.3f}s: "
+                f"{type(e).__name__}: {str(e)}",
+                exc_info=True
+            )
+            raise

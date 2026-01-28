@@ -1,0 +1,2084 @@
+diff --git a/api/files.py b/api/files.py
+index 8bae7b2..7f66780 100644
+--- a/api/files.py
++++ b/api/files.py
+@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
+ from typing import Optional
+ import uuid
+ from datetime import datetime
++import icontract
+ 
+ from api.database import get_db, hash_api_key, File as DBFile, Project as DBProject, User
+ from api.models import (
+@@ -65,6 +66,23 @@ def get_project_owner_filter(user: Optional[User] = None, api_key_hash_value: Op
+         return false()
+ 
+ 
++@icontract.require(
++    lambda request, api_key, db, current_user:
++        request is not None and
++        request.project_id is not None and
++        request.filename is not None and
++        len(request.filename) > 0 and
++        request.content is not None and
++        db is not None,
++    "Preconditions: Valid request, non-empty filename, db session exists"
++)
++@icontract.ensure(
++    lambda result, request, api_key, db, current_user, OLD:
++        result is not None and
++        result.file_id is not None and
++        result.filename == request.filename,
++    "Postconditions: File saved successfully with matching filename"
++)
+ @router.post("/save", response_model=FileSaveResponse)
+ async def save_file(
+     request: FileSaveRequest,
+@@ -197,6 +215,22 @@ async def list_files(
+     )
+ 
+ 
++@icontract.require(
++    lambda file_id, request, api_key, db, current_user:
++        file_id is not None and
++        len(file_id) > 0 and
++        request is not None and
++        request.content is not None and
++        db is not None,
++    "Preconditions: Valid file_id, non-empty content, db session exists"
++)
++@icontract.ensure(
++    lambda result, file_id, request, api_key, db, current_user, OLD:
++        result is not None and
++        result.file_id == file_id and
++        result.content == request.content,
++    "Postconditions: File updated successfully with matching content"
++)
+ @router.put("/{file_id}", response_model=FileResponse)
+ async def update_file(
+     file_id: str,
+@@ -256,6 +290,20 @@ async def update_file(
+     )
+ 
+ 
++@icontract.require(
++    lambda file_id, api_key, db, current_user:
++        file_id is not None and
++        len(file_id) > 0 and
++        db is not None,
++    "Preconditions: Valid file_id, db session exists"
++)
++@icontract.ensure(
++    lambda result, file_id, api_key, db, current_user, OLD:
++        result is not None and
++        result.get("deleted") == True and
++        result.get("file_id") == file_id,
++    "Postconditions: File deleted successfully"
++)
+ @router.delete("/{file_id}")
+ async def delete_file(
+     file_id: str,
+diff --git a/api/projects.py b/api/projects.py
+index e7f91a2..1954521 100644
+--- a/api/projects.py
++++ b/api/projects.py
+@@ -9,6 +9,7 @@ from sqlalchemy import func
+ from typing import Optional
+ from datetime import datetime
+ import logging
++import icontract
+ 
+ from api.database import get_db, hash_api_key, Project as DBProject, File as DBFile, User
+ from api.models import (
+@@ -22,6 +23,7 @@ from api.models import (
+     FileMetadata,
+ )
+ from api.auth import get_current_user
++from api.core import adapters, migration
+ 
+ router = APIRouter(prefix="/api/projects", tags=["projects"])
+ 
+@@ -71,6 +73,19 @@ def get_project_owner_id(
+     return (None, None)
+ 
+ 
++@icontract.require(
++    lambda user, api_key_hash_value, db:
++        user is not None and
++        api_key_hash_value is not None and
++        len(api_key_hash_value) > 0 and
++        db is not None,
++    "Preconditions: user must be authenticated, api_key_hash must be valid, db session must exist"
++)
++@icontract.ensure(
++    lambda result, user, api_key_hash_value, db, OLD:
++        result >= 0,
++    "Postconditions: return value >= 0 (number of migrated projects)"
++)
+ def migrate_anonymous_projects_to_user(
+     user: User,
+     api_key_hash_value: str,
+@@ -80,25 +95,44 @@ def migrate_anonymous_projects_to_user(
+     Migrate anonymous projects (created with api_key_hash) to authenticated user.
+     This happens when a user logs in and has projects created before authentication.
+     Returns the number of projects migrated.
++    
++    Refactored to use Functional Core / Imperative Shell architecture:
++    - Shell (I/O): Fetch state, apply diff, commit
++    - Core (Logic): Pure migration function matching Dafny spec
++    
++    See: api/verification/project_migration.dfy :: MigrateAnonymousProjects
++    See: api/core/migration.py :: migrate_anonymous_projects
+     """
+-    # Find projects that match the current session's api_key_hash but don't have a user_id
+-    # These are projects created anonymously before the user logged in
+-    projects_to_migrate = db.query(DBProject).filter(
+-        DBProject.api_key_hash == api_key_hash_value,
+-        DBProject.user_id.is_(None)
+-    ).all()
+-    
+-    if not projects_to_migrate:
++    # 1. I/O: Fetch snapshot (all projects and files for full state)
++    projects = db.query(DBProject).all()
++    files = db.query(DBFile).all()
++    
++    # 2. ADAPTER: Build SystemState from SQLAlchemy objects
++    old_state = adapters.build_system_state(projects, files)
++    
++    # Count projects that will be migrated (before migration)
++    projects_to_migrate = [
++        p for p in projects
++        if p.api_key_hash == api_key_hash_value and p.user_id is None
++    ]
++    migrated_count = len(projects_to_migrate)
++    
++    if migrated_count == 0:
+         return 0
+     
+-    # Migrate them to the authenticated user
+-    migrated_count = 0
+-    for project in projects_to_migrate:
+-        project.user_id = user.user_id
+-        # Keep api_key_hash for backward compatibility, but user_id takes precedence
+-        migrated_count += 1
++    # 3. CORE: Call pure logic (matches Dafny MigrateAnonymousProjects)
++    new_state = migration.migrate_anonymous_projects(
++        old_state,
++        str(user.user_id),
++        api_key_hash_value
++    )
++    
++    # 4. ADAPTER: Apply state diff back to database
++    adapters.apply_state_diff(db, old_state, new_state)
+     
++    # 5. I/O: Commit changes
+     db.commit()
++    
+     logger.info(f"Migrated {migrated_count} anonymous projects to user {user.user_id}")
+     return migrated_count
+ 
+@@ -449,6 +483,20 @@ async def update_project(
+     )
+ 
+ 
++@icontract.require(
++    lambda project_id, api_key, db, current_user:
++        project_id is not None and
++        len(project_id) > 0 and
++        db is not None,
++    "Preconditions: Valid project_id, db session exists"
++)
++@icontract.ensure(
++    lambda result, project_id, api_key, db, current_user, OLD:
++        result is not None and
++        result.deleted == True and
++        result.project_id == project_id,
++    "Postconditions: Project deleted successfully"
++)
+ @router.delete("/{project_id}", response_model=ProjectDeleteResponse)
+ async def delete_project(
+     project_id: str,
+diff --git a/api/requirements.txt b/api/requirements.txt
+index 8c3da8d..f28e5c7 100644
+--- a/api/requirements.txt
++++ b/api/requirements.txt
+@@ -21,4 +21,6 @@ tree-sitter-typescript>=0.21.0
+ # Google Gemini for Transpiler
+ google-generativeai>=0.3.0
+ 
++# Runtime Contract Enforcement (Spec-First Architecture)
++icontract>=2.6.0
+ 
+diff --git a/.github/workflows/verify-dafny.yml b/.github/workflows/verify-dafny.yml
+new file mode 100644
+index 0000000..d1a11e4
+--- /dev/null
++++ b/.github/workflows/verify-dafny.yml
+@@ -0,0 +1,40 @@
++name: Verify Dafny Specifications
++
++on:
++  push:
++    branches: [ main, develop ]
++    paths:
++      - 'api/verification/**/*.dfy'
++      - '.github/workflows/verify-dafny.yml'
++  pull_request:
++    branches: [ main, develop ]
++    paths:
++      - 'api/verification/**/*.dfy'
++      - '.github/workflows/verify-dafny.yml'
++  workflow_dispatch:
++
++jobs:
++  verify-dafny:
++    runs-on: ubuntu-latest
++    
++    steps:
++      - name: Checkout code
++        uses: actions/checkout@v4
++      
++      - name: Set up Docker Buildx
++        uses: docker/setup-buildx-action@v3
++      
++      - name: Build Docker image
++        run: |
++          docker-compose build api
++      
++      - name: Verify Dafny specifications
++        run: |
++          # Verify all Dafny files in api/verification/
++          docker-compose run --rm api dafny verify api/verification/*.dfy
++      
++      - name: Check verification results
++        if: failure()
++        run: |
++          echo "Dafny verification failed. Please check the output above."
++          exit 1
+diff --git a/api/core/__init__.py b/api/core/__init__.py
+new file mode 100644
+index 0000000..8ce6f0a
+--- /dev/null
++++ b/api/core/__init__.py
+@@ -0,0 +1,8 @@
++"""
++Functional Core module for Guardian Gateway.
++Contains pure Python logic matching Dafny Functional Core specifications.
++
++This module implements the "Functional Core / Imperative Shell" architecture:
++- Core: Pure functions with no side effects (matches Dafny specs)
++- Shell: I/O operations (database, HTTP) handled in api/*.py routers
++"""
+diff --git a/api/core/adapters.py b/api/core/adapters.py
+new file mode 100644
+index 0000000..9400fb6
+--- /dev/null
++++ b/api/core/adapters.py
+@@ -0,0 +1,139 @@
++"""
++State builders: SQLAlchemy ORM → Core models adapter.
++Critical component for safely converting mutable SQLAlchemy objects to immutable Core models.
++
++This is the most difficult part of the Shell (Oracle identified as highest risk).
++Must reliably translate SQLAlchemy ORM objects (Mutable) into Python Core Models (Immutable/Frozen).
++"""
++
++from typing import List, Dict
++from sqlalchemy.orm import Session
++
++from api.database import Project as DBProject, File as DBFile
++from api.core.models import SystemState, Project, File, Owner, FileType
++
++
++def build_system_state(
++    projects: List[DBProject],
++    files: List[DBFile]
++) -> SystemState:
++    """
++    Build SystemState from SQLAlchemy ORM objects.
++    
++    This function safely converts mutable SQLAlchemy objects to immutable Core models.
++    It computes the file_ids sets for projects based on the files list.
++    
++    Args:
++        projects: List of SQLAlchemy Project objects
++        files: List of SQLAlchemy File objects
++    
++    Returns:
++        Immutable SystemState snapshot
++    
++    Raises:
++        ValueError: If state invariants are violated
++    """
++    # Build files map first
++    files_map: Dict[str, File] = {}
++    for db_file in files:
++        # Convert file_type enum to FileType
++        file_type_map = {
++            'md': FileType.MD,
++            'dfy': FileType.DFY,
++            'unit': FileType.UNIT
++        }
++        file_type = file_type_map.get(db_file.file_type, FileType.MD)
++        
++        file_obj = File(
++            file_id=str(db_file.file_id),
++            project_id=str(db_file.project_id),
++            filename=db_file.filename,
++            content=db_file.content,
++            file_type=file_type,
++            size_bytes=len(db_file.content.encode('utf-8')),
++            renamed=db_file.renamed
++        )
++        files_map[str(db_file.file_id)] = file_obj
++    
++    # Build projects map with file_ids sets computed from files
++    projects_map: Dict[str, Project] = {}
++    for db_project in projects:
++        # Determine owner
++        if db_project.user_id:
++            owner = Owner.authenticated(str(db_project.user_id))
++        elif db_project.api_key_hash:
++            owner = Owner.anonymous(db_project.api_key_hash)
++        else:
++            # Should not happen, but handle gracefully
++            owner = Owner.anonymous("")
++        
++        # Compute file_ids set from files belonging to this project
++        file_ids = {
++            str(f.file_id) for f in files
++            if str(f.project_id) == str(db_project.project_id)
++        }
++        
++        project_obj = Project(
++            project_id=str(db_project.project_id),
++            name=db_project.name,
++            description=db_project.description or "",
++            owner=owner,
++            file_ids=file_ids
++        )
++        projects_map[str(db_project.project_id)] = project_obj
++    
++    state = SystemState(projects=projects_map, files=files_map)
++    
++    # Validate state invariants
++    state.validate()
++    
++    return state
++
++
++def apply_state_diff(
++    db: Session,
++    old_state: SystemState,
++    new_state: SystemState
++) -> None:
++    """
++    Apply state diff to database (update SQLAlchemy objects).
++    
++    This function compares old_state and new_state and applies changes to the database.
++    It handles:
++    - Project updates (owner changes, name/description changes)
++    - File updates (content changes, new files, deleted files)
++    
++    Args:
++        db: SQLAlchemy database session
++        old_state: Previous SystemState snapshot
++        new_state: New SystemState snapshot (from Core function)
++    
++    Note:
++        This function performs I/O operations (database writes).
++        It should only be called from the Imperative Shell.
++    """
++    # Find projects that changed
++    for project_id, new_project in new_state.projects.items():
++        old_project = old_state.projects.get(project_id)
++        
++        if old_project is None:
++            # New project - should not happen in migration, but handle it
++            continue
++        
++        # Check if owner changed (this is the migration case)
++        if old_project.owner != new_project.owner:
++            db_project = db.query(DBProject).filter(
++                DBProject.project_id == project_id
++            ).first()
++            
++            if db_project:
++                # Update owner
++                if new_project.owner.is_authenticated():
++                    db_project.user_id = new_project.owner.user_id
++                    # Keep api_key_hash for backward compatibility
++                elif new_project.owner.is_anonymous():
++                    db_project.api_key_hash = new_project.owner.api_key_hash
++                    db_project.user_id = None
++    
++    # Note: File changes are handled separately in file operations
++    # This adapter focuses on project migration (owner changes)
+diff --git a/api/core/migration.py b/api/core/migration.py
+new file mode 100644
+index 0000000..023b6d1
+--- /dev/null
++++ b/api/core/migration.py
+@@ -0,0 +1,100 @@
++"""
++Migration logic: Manual synthesis from Dafny specification.
++Pure function matching Dafny MigrateAnonymousProjects.
++
++This is the "few-shot" example for the synthesis script.
++Manually written to match the Dafny spec exactly.
++
++See: api/verification/project_migration.dfy :: MigrateAnonymousProjects
++"""
++
++import icontract
++from api.core.models import SystemState, Project, Owner
++
++
++@icontract.require(
++    lambda state, user_id, current_session_hash:
++        state is not None and
++        user_id is not None and
++        len(user_id) > 0 and
++        current_session_hash is not None and
++        len(current_session_hash) > 0 and
++        state.validate(),
++    "Preconditions: Valid state, non-empty user_id and session_hash"
++)
++@icontract.ensure(
++    lambda result, state, user_id, current_session_hash, OLD:
++        result.validate() and
++        # All projects owned by session_hash now owned by user_id
++        all(
++            result.projects[pid].owner == Owner.authenticated(user_id)
++            for pid in result.projects
++            if pid in OLD.get_value(lambda: state.projects) and
++            OLD.get_value(lambda: state.projects[pid]).owner == Owner.anonymous(current_session_hash)
++        ) and
++        # Projects not owned by session_hash remain unchanged
++        all(
++            result.projects[pid] == OLD.get_value(lambda: state.projects[pid])
++            for pid in result.projects
++            if pid in OLD.get_value(lambda: state.projects) and
++            OLD.get_value(lambda: state.projects[pid]).owner != Owner.anonymous(current_session_hash)
++        ),
++    "Postconditions: Valid state, migrated projects have new owner, other projects unchanged"
++)
++def migrate_anonymous_projects(
++    state: SystemState,
++    user_id: str,
++    current_session_hash: str
++) -> SystemState:
++    """
++    Migrate anonymous projects to authenticated user.
++    
++    Pure function matching Dafny MigrateAnonymousProjects exactly.
++    Takes immutable state, returns new immutable state.
++    No side effects, no database access.
++    
++    This function implements the logic from:
++    api/verification/project_migration.dfy :: MigrateAnonymousProjects
++    
++    Args:
++        state: Current system state snapshot
++        user_id: UUID of authenticated user
++        current_session_hash: API key hash of current session
++    
++    Returns:
++        New SystemState with migrated projects
++    
++    Security Property (Theorem_Isolation):
++        Projects NOT owned by current_session_hash are never modified.
++    """
++    # 1. Identify Candidate Projects (The 'Filter')
++    # Logic: Projects owned by THIS session hash
++    candidates = {
++        pid for pid, project in state.projects.items()
++        if project.owner == Owner.anonymous(current_session_hash)
++    }
++    
++    # 2. Transform State (The 'Map')
++    new_projects = {}
++    for pid, project in state.projects.items():
++        if pid in candidates:
++            # TRANSITION: Anonymous -> Authenticated
++            new_project = Project(
++                project_id=project.project_id,
++                name=project.name,
++                description=project.description,
++                owner=Owner.authenticated(user_id),
++                file_ids=project.file_ids
++            )
++            new_projects[pid] = new_project
++        else:
++            # PRESERVE: Untouched
++            new_projects[pid] = project
++    
++    # 3. Return New State
++    new_state = SystemState(projects=new_projects, files=state.files)
++    
++    # Validate invariants
++    new_state.validate()
++    
++    return new_state
+diff --git a/api/core/models.py b/api/core/models.py
+new file mode 100644
+index 0000000..b6eb0ff
+--- /dev/null
++++ b/api/core/models.py
+@@ -0,0 +1,181 @@
++"""
++Python models matching Dafny DatabaseModel structure.
++These are immutable dataclasses representing the Functional Core state.
++
++See: api/verification/models.dfy :: DatabaseModel
++"""
++
++from dataclasses import dataclass, field
++from typing import Dict, Set, Optional
++from enum import Enum
++
++
++class FileType(Enum):
++    """File type enum matching Dafny FileType."""
++    MD = "md"
++    DFY = "dfy"
++    UNIT = "unit"
++
++
++@dataclass(frozen=True)
++class Owner:
++    """
++    Ownership model matching Dafny Owner union type.
++    Immutable: either Authenticated(userId) or Anonymous(apiKeyHash).
++    """
++    user_id: Optional[str] = None
++    api_key_hash: Optional[str] = None
++    
++    def __post_init__(self):
++        """Validate that exactly one ownership type is set."""
++        if (self.user_id is None) == (self.api_key_hash is None):
++            raise ValueError("Owner must have either user_id OR api_key_hash, not both or neither")
++    
++    @classmethod
++    def authenticated(cls, user_id: str) -> "Owner":
++        """Create authenticated owner."""
++        return cls(user_id=user_id, api_key_hash=None)
++    
++    @classmethod
++    def anonymous(cls, api_key_hash: str) -> "Owner":
++        """Create anonymous owner."""
++        return cls(user_id=None, api_key_hash=api_key_hash)
++    
++    def is_authenticated(self) -> bool:
++        """Check if owner is authenticated."""
++        return self.user_id is not None
++    
++    def is_anonymous(self) -> bool:
++        """Check if owner is anonymous."""
++        return self.api_key_hash is not None
++
++
++@dataclass(frozen=True)
++class File:
++    """
++    File model matching Dafny File datatype.
++    Immutable dataclass representing a file in the system.
++    """
++    file_id: str
++    project_id: str
++    filename: str
++    content: str
++    file_type: FileType
++    size_bytes: int
++    renamed: bool = False
++    
++    def __post_init__(self):
++        """Validate file size matches content length."""
++        if self.size_bytes != len(self.content.encode('utf-8')):
++            raise ValueError(f"File size_bytes ({self.size_bytes}) must match content length ({len(self.content.encode('utf-8'))})")
++
++
++@dataclass(frozen=True)
++class Project:
++    """
++    Project model matching Dafny Project datatype.
++    Immutable dataclass representing a project in the system.
++    """
++    project_id: str
++    name: str
++    description: str
++    owner: Owner
++    file_ids: Set[str] = field(default_factory=set)
++
++
++@dataclass(frozen=True)
++class SystemState:
++    """
++    System state snapshot matching Dafny SystemState.
++    Immutable snapshot of the entire system state.
++    
++    This is the "World" passed to every transition function in the Functional Core.
++    """
++    projects: Dict[str, Project] = field(default_factory=dict)
++    files: Dict[str, File] = field(default_factory=dict)
++    
++    def validate(self) -> bool:
++        """
++        Validate system state invariants matching Dafny ValidState predicate.
++        
++        Returns:
++            True if state is valid, raises ValueError if invalid
++        """
++        # 1. Relational Integrity: Every file pointed to by a project exists
++        for pid, project in self.projects.items():
++            for fid in project.file_ids:
++                if fid not in self.files:
++                    raise ValueError(f"Project {pid} references file {fid} that doesn't exist")
++        
++        # 2. Reverse Integrity: Every file points back to its project
++        for fid, file_obj in self.files.items():
++            if file_obj.project_id not in self.projects:
++                raise ValueError(f"File {fid} references project {file_obj.project_id} that doesn't exist")
++            
++            if fid not in self.projects[file_obj.project_id].file_ids:
++                raise ValueError(f"File {fid} not in project {file_obj.project_id}.file_ids")
++        
++        # 3. Size Integrity: File metadata matches content
++        for fid, file_obj in self.files.items():
++            expected_size = len(file_obj.content.encode('utf-8'))
++            if file_obj.size_bytes != expected_size:
++                raise ValueError(f"File {fid} size_bytes ({file_obj.size_bytes}) doesn't match content length ({expected_size})")
++        
++        return True
++    
++    def with_project(self, project: Project) -> "SystemState":
++        """Return new state with project added/updated (immutable update)."""
++        new_projects = {**self.projects, project.project_id: project}
++        return SystemState(projects=new_projects, files=self.files)
++    
++    def with_file(self, file_obj: File) -> "SystemState":
++        """Return new state with file added/updated (immutable update)."""
++        new_files = {**self.files, file_obj.file_id: file_obj}
++        # Update project's file_ids set
++        project = self.projects.get(file_obj.project_id)
++        if project:
++            new_file_ids = project.file_ids | {file_obj.file_id}
++            new_project = Project(
++                project_id=project.project_id,
++                name=project.name,
++                description=project.description,
++                owner=project.owner,
++                file_ids=new_file_ids
++            )
++            new_projects = {**self.projects, new_project.project_id: new_project}
++        else:
++            new_projects = self.projects
++        
++        return SystemState(projects=new_projects, files=new_files)
++    
++    def without_project(self, project_id: str) -> "SystemState":
++        """Return new state with project removed (immutable update)."""
++        new_projects = {k: v for k, v in self.projects.items() if k != project_id}
++        # Also remove all files belonging to this project
++        new_files = {k: v for k, v in self.files.items() if v.project_id != project_id}
++        return SystemState(projects=new_projects, files=new_files)
++    
++    def without_file(self, file_id: str) -> "SystemState":
++        """Return new state with file removed (immutable update)."""
++        file_obj = self.files.get(file_id)
++        if not file_obj:
++            return self
++        
++        new_files = {k: v for k, v in self.files.items() if k != file_id}
++        
++        # Update project's file_ids set
++        project = self.projects.get(file_obj.project_id)
++        if project:
++            new_file_ids = project.file_ids - {file_id}
++            new_project = Project(
++                project_id=project.project_id,
++                name=project.name,
++                description=project.description,
++                owner=project.owner,
++                file_ids=new_file_ids
++            )
++            new_projects = {**self.projects, new_project.project_id: new_project}
++        else:
++            new_projects = self.projects
++        
++        return SystemState(projects=new_projects, files=new_files)
+diff --git a/api/verification/contract_translator.py b/api/verification/contract_translator.py
+new file mode 100644
+index 0000000..ed6b10c
+--- /dev/null
++++ b/api/verification/contract_translator.py
+@@ -0,0 +1,177 @@
++"""
++Contract translator: Dafny → icontract translation helper.
++Converts Dafny pre/postconditions to Python icontract decorators.
++"""
++
++import re
++from typing import List, Tuple, Optional
++
++
++def dafny_to_icontract_require(dafny_precondition: str) -> str:
++    """
++    Translate Dafny precondition to icontract.require decorator.
++    
++    Args:
++        dafny_precondition: Dafny precondition string (e.g., "ValidState(state)")
++    
++    Returns:
++        Python lambda expression string for icontract.require
++    
++    Example:
++        Input: "ValidState(state)"
++        Output: "lambda state: state.validate()"
++    """
++    # Simple translation patterns
++    # TODO: Implement full Dafny expression parser
++    
++    # Pattern: ValidState(state) -> state.validate()
++    if "ValidState" in dafny_precondition:
++        state_var = re.search(r"ValidState\((\w+)\)", dafny_precondition)
++        if state_var:
++            return f"lambda {state_var.group(1)}: {state_var.group(1)}.validate()"
++    
++    # Pattern: x != None -> x is not None
++    dafny_precondition = re.sub(r"(\w+)\s*!=\s*None", r"\1 is not None", dafny_precondition)
++    dafny_precondition = re.sub(r"(\w+)\s*==\s*None", r"\1 is None", dafny_precondition)
++    
++    # Pattern: |x| > 0 -> len(x) > 0
++    dafny_precondition = re.sub(r"\|(\w+)\|\s*>\s*0", r"len(\1) > 0", dafny_precondition)
++    
++    # Return as lambda (assume single expression)
++    # Extract variables from expression
++    vars_match = re.findall(r'\b([a-z_][a-z0-9_]*)\b', dafny_precondition.lower())
++    vars_set = set(vars_match) - {'and', 'or', 'not', 'in', 'is', 'len'}
++    
++    if vars_set:
++        vars_str = ", ".join(sorted(vars_set))
++        return f"lambda {vars_str}: {dafny_precondition}"
++    
++    return f"lambda: {dafny_precondition}"
++
++
++def dafny_to_icontract_ensure(dafny_postcondition: str) -> str:
++    """
++    Translate Dafny postcondition to icontract.ensure decorator.
++    
++    Args:
++        dafny_postcondition: Dafny postcondition string
++    
++    Returns:
++        Python lambda expression string for icontract.ensure
++    
++    Example:
++        Input: "ValidState(result)"
++        Output: "lambda result, OLD: result.validate()"
++    """
++    # Simple translation patterns
++    # TODO: Implement full Dafny expression parser
++    
++    # Pattern: ValidState(result) -> result.validate()
++    if "ValidState" in dafny_postcondition:
++        state_var = re.search(r"ValidState\((\w+)\)", dafny_postcondition)
++        if state_var:
++            return f"lambda {state_var.group(1)}, OLD: {state_var.group(1)}.validate()"
++    
++    # Pattern: result.Success? -> result.success (for Result types)
++    dafny_postcondition = re.sub(r"(\w+)\.Success\?", r"\1.success", dafny_postcondition)
++    
++    # Pattern: x != None -> x is not None
++    dafny_postcondition = re.sub(r"(\w+)\s*!=\s*None", r"\1 is not None", dafny_postcondition)
++    
++    # Extract variables
++    vars_match = re.findall(r'\b([a-z_][a-z0-9_]*)\b', dafny_postcondition.lower())
++    vars_set = set(vars_match) - {'and', 'or', 'not', 'in', 'is', 'len', 'old', 'implies'}
++    
++    # Add OLD for postconditions
++    vars_list = sorted(vars_set)
++    if 'result' in vars_list:
++        vars_list.remove('result')
++        vars_list.insert(0, 'result')
++    vars_list.append('OLD')
++    
++    vars_str = ", ".join(vars_list)
++    return f"lambda {vars_str}: {dafny_postcondition}"
++
++
++def extract_contracts_from_dafny(dafny_code: str, function_name: str) -> Tuple[List[str], List[str]]:
++    """
++    Extract preconditions and postconditions from Dafny function.
++    
++    Args:
++        dafny_code: Dafny source code
++        function_name: Name of function to extract contracts from
++    
++    Returns:
++        Tuple of (preconditions, postconditions) lists
++    """
++    preconditions = []
++    postconditions = []
++    
++    lines = dafny_code.split('\n')
++    in_function = False
++    in_requires = False
++    in_ensures = False
++    
++    for line in lines:
++        if f"function {function_name}" in line:
++            in_function = True
++            continue
++        
++        if not in_function:
++            continue
++        
++        if '{' in line:
++            break
++        
++        if "requires" in line:
++            in_requires = True
++            in_ensures = False
++            # Extract condition after "requires"
++            cond = line.split("requires", 1)[1].strip()
++            if cond:
++                preconditions.append(cond)
++            continue
++        
++        if "ensures" in line:
++            in_ensures = True
++            in_requires = False
++            # Extract condition after "ensures"
++            cond = line.split("ensures", 1)[1].strip()
++            if cond:
++                postconditions.append(cond)
++            continue
++        
++        if in_requires:
++            preconditions.append(line.strip())
++        elif in_ensures:
++            postconditions.append(line.strip())
++    
++    return preconditions, postconditions
++
++
++def generate_icontract_decorators(dafny_code: str, function_name: str) -> str:
++    """
++    Generate icontract decorators from Dafny function.
++    
++    Args:
++        dafny_code: Dafny source code
++        function_name: Name of function
++    
++    Returns:
++        Python decorator code string
++    """
++    preconditions, postconditions = extract_contracts_from_dafny(dafny_code, function_name)
++    
++    decorators = []
++    
++    for precond in preconditions:
++        if precond.strip():
++            lambda_expr = dafny_to_icontract_require(precond.strip())
++            decorators.append(f"@icontract.require({lambda_expr})")
++    
++    for postcond in postconditions:
++        if postcond.strip():
++            lambda_expr = dafny_to_icontract_ensure(postcond.strip())
++            decorators.append(f"@icontract.ensure({lambda_expr})")
++    
++    return "\n".join(decorators)
+diff --git a/api/verification/dafny_runner.py b/api/verification/dafny_runner.py
+new file mode 100644
+index 0000000..8584579
+--- /dev/null
++++ b/api/verification/dafny_runner.py
+@@ -0,0 +1,164 @@
++"""
++Python wrapper for Docker-based Dafny verification execution.
++Provides structured interface for running Dafny verification from Python code.
++"""
++
++import subprocess
++import logging
++from typing import List, Dict, Optional, Tuple
++from pathlib import Path
++import json
++
++logger = logging.getLogger(__name__)
++
++
++class DafnyVerificationResult:
++    """Structured result from Dafny verification."""
++    
++    def __init__(
++        self,
++        success: bool,
++        output: str,
++        error: Optional[str] = None,
++        verified_files: Optional[List[str]] = None,
++        failed_files: Optional[List[str]] = None
++    ):
++        self.success = success
++        self.output = output
++        self.error = error
++        self.verified_files = verified_files or []
++        self.failed_files = failed_files or []
++    
++    def to_dict(self) -> Dict:
++        """Convert to dictionary for JSON serialization."""
++        return {
++            "success": self.success,
++            "output": self.output,
++            "error": self.error,
++            "verified_files": self.verified_files,
++            "failed_files": self.failed_files
++        }
++
++
++def verify_dafny_files(
++    files: List[str],
++    docker_service: str = "api",
++    timeout: int = 300
++) -> DafnyVerificationResult:
++    """
++    Verify Dafny files using Docker container.
++    
++    Args:
++        files: List of Dafny file paths to verify
++        docker_service: Docker Compose service name (default: "api")
++        timeout: Timeout in seconds (default: 300)
++    
++    Returns:
++        DafnyVerificationResult with verification status and output
++    """
++    if not files:
++        return DafnyVerificationResult(
++            success=False,
++            output="",
++            error="No files provided for verification"
++        )
++    
++    # Build docker-compose command
++    cmd = [
++        "docker-compose",
++        "exec",
++        "-T",
++        docker_service,
++        "dafny",
++        "verify"
++    ] + files
++    
++    logger.info(f"Running Dafny verification: {' '.join(cmd)}")
++    
++    try:
++        result = subprocess.run(
++            cmd,
++            capture_output=True,
++            text=True,
++            timeout=timeout,
++            check=False  # Don't raise on non-zero exit
++        )
++        
++        # Parse output to determine success
++        output = result.stdout + result.stderr
++        success = result.returncode == 0
++        
++        # Simple parsing: look for verification success indicators
++        verified_files = []
++        failed_files = []
++        
++        if success:
++            # Extract verified files from output
++            for file_path in files:
++                if "verified" in output.lower() or "Dafny program verifier finished" in output:
++                    verified_files.append(file_path)
++        else:
++            # Extract failed files from error output
++            for file_path in files:
++                if file_path in output:
++                    failed_files.append(file_path)
++        
++        return DafnyVerificationResult(
++            success=success,
++            output=output,
++            error=result.stderr if not success else None,
++            verified_files=verified_files,
++            failed_files=failed_files
++        )
++    
++    except subprocess.TimeoutExpired:
++        return DafnyVerificationResult(
++            success=False,
++            output="",
++            error=f"Verification timed out after {timeout} seconds"
++        )
++    except Exception as e:
++        return DafnyVerificationResult(
++            success=False,
++            output="",
++            error=f"Error running Dafny verification: {str(e)}"
++        )
++
++
++def verify_all_dafny_specs(
++    verification_dir: str = "api/verification",
++    docker_service: str = "api"
++) -> DafnyVerificationResult:
++    """
++    Verify all Dafny specification files in the verification directory.
++    
++    Args:
++        verification_dir: Directory containing Dafny files
++        docker_service: Docker Compose service name
++    
++    Returns:
++        DafnyVerificationResult for all files
++    """
++    verification_path = Path(verification_dir)
++    
++    if not verification_path.exists():
++        return DafnyVerificationResult(
++            success=False,
++            output="",
++            error=f"Verification directory not found: {verification_dir}"
++        )
++    
++    # Find all .dfy files
++    dafny_files = list(verification_path.glob("*.dfy"))
++    
++    if not dafny_files:
++        return DafnyVerificationResult(
++            success=False,
++            output="",
++            error=f"No Dafny files found in {verification_dir}"
++        )
++    
++    file_paths = [str(f) for f in dafny_files]
++    logger.info(f"Found {len(file_paths)} Dafny files to verify")
++    
++    return verify_dafny_files(file_paths, docker_service=docker_service)
+diff --git a/api/verification/file_operations.dfy b/api/verification/file_operations.dfy
+new file mode 100644
+index 0000000..587553b
+--- /dev/null
++++ b/api/verification/file_operations.dfy
+@@ -0,0 +1,76 @@
++module FileOperations {
++  import opened DatabaseModel
++
++  // --- Result Type for Operations ---
++  datatype Result<T> = 
++    | Success(value: T)
++    | Failure(error: string)
++
++  // --- File Operations ---
++  
++  // [EXPERT_INPUT_REQUIRED]
++  // Expert needs to provide: Full implementation matching Python save_file() logic
++  // Current placeholder: Basic structure with ownership checks
++  
++  function SaveFile(
++    state: SystemState,
++    projectId: UUID,
++    filename: string,
++    content: Content,
++    fileType: FileType,
++    ownerId: UUID
++  ): (newState: SystemState, result: Result<UUID>)
++    requires ValidState(state)
++    // [EXPERT: Add full preconditions matching Python contracts]
++    // - Project exists and is owned by ownerId
++    // - Filename is unique within project
++    // - Content size matches constraints
++    ensures ValidState(newState)
++    // [EXPERT: Add full postconditions]
++    // - If Success, file exists in newState.files
++    // - File belongs to project
++    // - Project's fileIds set updated
++  {
++    // [EXPERT: Implement full logic]
++    // Placeholder: Return failure for now
++    (state, Failure("Not implemented"))
++  }
++
++  // [EXPERT_INPUT_REQUIRED]
++  function UpdateFile(
++    state: SystemState,
++    fileId: UUID,
++    content: Content,
++    ownerId: UUID
++  ): (newState: SystemState, result: Result<UUID>)
++    requires ValidState(state)
++    // [EXPERT: Add preconditions]
++    ensures ValidState(newState)
++    // [EXPERT: Add postconditions]
++  {
++    // [EXPERT: Implement full logic]
++    (state, Failure("Not implemented"))
++  }
++
++  // [EXPERT_INPUT_REQUIRED]
++  function DeleteFile(
++    state: SystemState,
++    fileId: UUID,
++    ownerId: UUID
++  ): (newState: SystemState, result: Result<bool>)
++    requires ValidState(state)
++    // [EXPERT: Add preconditions]
++    ensures ValidState(newState)
++    // [EXPERT: Add postconditions]
++  {
++    // [EXPERT: Implement full logic]
++    (state, Failure("Not implemented"))
++  }
++
++  // --- Test Generation ---
++  method GenerateTests() returns (testCases: seq<(SystemState, UUID, string, Content, FileType, UUID, SystemState, Result<UUID>)>)
++  {
++    // [EXPERT: Add concrete test cases]
++    testCases := [];
++  }
++}
+diff --git a/api/verification/models.dfy b/api/verification/models.dfy
+new file mode 100644
+index 0000000..b624d02
+--- /dev/null
++++ b/api/verification/models.dfy
+@@ -0,0 +1,62 @@
++module DatabaseModel {
++  // --- Primitive Types ---
++  // We model UUIDs and Content as opaque strings for now
++  type UUID = string
++  type Content = string
++  
++  // --- Enums matching database.py ---
++  datatype FileType = MD | DFY | UNIT
++  
++  // --- Ownership Model (The Critical Security Primitive) ---
++  // Mirrors database.py logic: User OR API Key Hash
++  datatype Owner = 
++    | Authenticated(userId: UUID) 
++    | Anonymous(apiKeyHash: string)
++
++  // --- Data Structures ---
++  
++  // Matches 'File' class in database.py
++  datatype File = File(
++    fileId: UUID,
++    projectId: UUID,
++    filename: string,
++    content: Content,
++    fileType: FileType,
++    sizeBytes: nat,
++    renamed: bool
++  )
++
++  // Matches 'Project' class in database.py
++  datatype Project = Project(
++    projectId: UUID,
++    name: string,
++    description: string,
++    owner: Owner,
++    // Relational Integrity: A project "knows" its file IDs
++    // This is a 'ghost' property in Python (computed) but explicit in Dafny
++    fileIds: set<UUID>
++  )
++
++  // --- System State Snapshot ---
++  // The 'World' passed to every transition function
++  datatype SystemState = SystemState(
++    projects: map<UUID, Project>,
++    files: map<UUID, File>
++  )
++
++  // --- Core Invariants ---
++  predicate ValidState(s: SystemState) {
++    // 1. Relational Integrity: Every file pointed to by a project exists
++    (forall pid :: pid in s.projects ==> 
++      forall fid :: fid in s.projects[pid].fileIds ==> fid in s.files) &&
++      
++    // 2. Reverse Integrity: Every file points back to its project
++    (forall fid :: fid in s.files ==> 
++      s.files[fid].projectId in s.projects &&
++      fid in s.projects[s.files[fid].projectId].fileIds) &&
++      
++    // 3. Size Integrity: File metadata matches content
++    (forall fid :: fid in s.files ==> 
++      s.files[fid].sizeBytes == |s.files[fid].content|)
++  }
++}
+diff --git a/api/verification/project_management.dfy b/api/verification/project_management.dfy
+new file mode 100644
+index 0000000..afa5b57
+--- /dev/null
++++ b/api/verification/project_management.dfy
+@@ -0,0 +1,58 @@
++module ProjectManagement {
++  import opened DatabaseModel
++
++  // --- Result Type ---
++  datatype Result<T> = 
++    | Success(value: T)
++    | Failure(error: string)
++
++  // --- Project Operations ---
++  
++  // [EXPERT_INPUT_REQUIRED]
++  // Expert needs to provide: Full implementation matching Python create_project() logic
++  function CreateProject(
++    state: SystemState,
++    name: string,
++    description: string,
++    owner: Owner
++  ): (newState: SystemState, result: Result<UUID>)
++    requires ValidState(state)
++    // [EXPERT: Add preconditions]
++    // - Name is unique for this owner
++    // - Name length constraints
++    // - Description length constraints
++    ensures ValidState(newState)
++    // [EXPERT: Add postconditions]
++    // - If Success, project exists in newState.projects
++    // - Project has correct owner
++    // - Project has empty fileIds set
++  {
++    // [EXPERT: Implement full logic]
++    (state, Failure("Not implemented"))
++  }
++
++  // [EXPERT_INPUT_REQUIRED]
++  function DeleteProject(
++    state: SystemState,
++    projectId: UUID,
++    ownerId: UUID
++  ): (newState: SystemState, result: Result<bool>)
++    requires ValidState(state)
++    // [EXPERT: Add preconditions]
++    // - Project exists and is owned by ownerId
++    ensures ValidState(newState)
++    // [EXPERT: Add postconditions]
++    // - If Success, project removed from newState.projects
++    // - All files in project also removed (cascade)
++  {
++    // [EXPERT: Implement full logic]
++    (state, Failure("Not implemented"))
++  }
++
++  // --- Test Generation ---
++  method GenerateTests() returns (testCases: seq<(SystemState, string, string, Owner, SystemState, Result<UUID>)>)
++  {
++    // [EXPERT: Add concrete test cases]
++    testCases := [];
++  }
++}
+diff --git a/api/verification/project_migration.dfy b/api/verification/project_migration.dfy
+new file mode 100644
+index 0000000..ccbd1d0
+--- /dev/null
++++ b/api/verification/project_migration.dfy
+@@ -0,0 +1,85 @@
++module ProjectMigration {
++  import opened DatabaseModel
++
++  // --- The Core Logic ---
++  // Pure function: Takes state, returns NEW state.
++  // No database side effects here.
++  function MigrateAnonymousProjects(
++    s: SystemState, 
++    userId: UUID, 
++    currentSessionHash: string
++  ): SystemState
++    requires ValidState(s)
++    // Security Lemma included directly in the logic signature
++    ensures ValidState(MigrateAnonymousProjects(s, userId, currentSessionHash))
++  {
++    // 1. Identify Candidate Projects (The 'Filter')
++    // Logic: Projects owned by THIS session hash
++    var candidates := set pid | 
++      pid in s.projects && 
++      s.projects[pid].owner == Anonymous(currentSessionHash);
++
++    // 2. Transform State (The 'Map')
++    var newProjects := map pid | pid in s.projects :: 
++      if pid in candidates then 
++        // TRANSITION: Anonymous -> Authenticated
++        s.projects[pid].(owner := Authenticated(userId))
++      else 
++        // PRESERVE: Untouched
++        s.projects[pid];
++
++    // 3. Return New State
++    s.(projects := newProjects)
++  }
++
++  // --- Security Proofs ---
++  
++  // Theorem: "We never accidentally steal someone else's project"
++  lemma Theorem_Isolation(s: SystemState, userId: UUID, hash: string, targetPid: UUID)
++    requires ValidState(s)
++    requires targetPid in s.projects
++    // If the project is NOT owned by the current session hash...
++    requires s.projects[targetPid].owner != Anonymous(hash)
++    // ...then it MUST NOT change.
++    ensures MigrateAnonymousProjects(s, userId, hash).projects[targetPid] == s.projects[targetPid]
++  {
++    // Dafny proves this automatically based on the function body
++  }
++
++  // --- Test Generation (Oracle Requirement) ---
++  // Concrete instances for test vector generation
++  
++  method GenerateTests() returns (testCases: seq<(SystemState, UUID, string, SystemState)>)
++  {
++    // Test Case 1: Single anonymous project to migrate
++    var project1Id := "p1";
++    var file1Id := "f1";
++    var sessionHash := "hash123";
++    var userId := "user456";
++    
++    var state1 := SystemState(
++      projects := map pid := project1Id :: Project(
++        projectId := project1Id,
++        name := "TestProject",
++        description := "Test",
++        owner := Anonymous(sessionHash),
++        fileIds := {file1Id}
++      ),
++      files := map fid := file1Id :: File(
++        fileId := file1Id,
++        projectId := project1Id,
++        filename := "test.md",
++        content := "content",
++        fileType := MD,
++        sizeBytes := 7,
++        renamed := false
++      )
++    );
++    
++    var expectedState1 := MigrateAnonymousProjects(state1, userId, sessionHash);
++    
++    testCases := [
++      (state1, userId, sessionHash, expectedState1)
++    ];
++  }
++}
+diff --git a/api/verification/spec_generation.dfy b/api/verification/spec_generation.dfy
+new file mode 100644
+index 0000000..a7b8384
+--- /dev/null
++++ b/api/verification/spec_generation.dfy
+@@ -0,0 +1,55 @@
++module SpecGeneration {
++  import opened DatabaseModel
++
++  // --- Result Type ---
++  datatype Result<T> = 
++    | Success(value: T)
++    | Failure(error: string)
++
++  // --- Specification Generation Operations ---
++  
++  // [EXPERT_INPUT_REQUIRED]
++  // Expert needs to provide: Full implementation matching Python spec generation logic
++  // This module handles the LLM-based specification generation and refinement
++  
++  function GenerateSpec(
++    state: SystemState,
++    projectId: UUID,
++    prompt: string,
++    ownerId: UUID
++  ): (newState: SystemState, result: Result<UUID>)
++    requires ValidState(state)
++    // [EXPERT: Add preconditions]
++    // - Project exists and is owned by ownerId
++    // - Prompt is non-empty
++    ensures ValidState(newState)
++    // [EXPERT: Add postconditions]
++    // - If Success, new spec file created
++  {
++    // [EXPERT: Implement full logic]
++    (state, Failure("Not implemented"))
++  }
++
++  // [EXPERT_INPUT_REQUIRED]
++  function RefineSpec(
++    state: SystemState,
++    fileId: UUID,
++    refinementPrompt: string,
++    ownerId: UUID
++  ): (newState: SystemState, result: Result<UUID>)
++    requires ValidState(state)
++    // [EXPERT: Add preconditions]
++    ensures ValidState(newState)
++    // [EXPERT: Add postconditions]
++  {
++    // [EXPERT: Implement full logic]
++    (state, Failure("Not implemented"))
++  }
++
++  // --- Test Generation ---
++  method GenerateTests() returns (testCases: seq<(SystemState, UUID, string, UUID, SystemState, Result<UUID>)>)
++  {
++    // [EXPERT: Add concrete test cases]
++    testCases := [];
++  }
++}
+diff --git a/api/verification/traceability.dfy b/api/verification/traceability.dfy
+new file mode 100644
+index 0000000..57fceea
+--- /dev/null
++++ b/api/verification/traceability.dfy
+@@ -0,0 +1,49 @@
++module Traceability {
++  import opened DatabaseModel
++
++  // --- Traceability Link Model ---
++  datatype UnitLink = UnitLink(
++    rootFileId: UUID,
++    unitFileId: UUID,
++    dafnyFileId: UUID,
++    startLine: nat,
++    endLine: nat
++  )
++
++  // --- Extended System State with Traceability ---
++  datatype SystemStateWithLinks = SystemStateWithLinks(
++    state: SystemState,
++    links: map<UUID, UnitLink>  // Maps unitFileId to its link
++  )
++
++  // [EXPERT_INPUT_REQUIRED]
++  // Expert needs to provide: Full implementation matching Python deconstruct logic
++  function CreateTraceabilityLink(
++    state: SystemStateWithLinks,
++    rootFileId: UUID,
++    unitFileId: UUID,
++    dafnyFileId: UUID,
++    startLine: nat,
++    endLine: nat
++  ): (newState: SystemStateWithLinks, result: bool)
++    requires ValidState(state.state)
++    // [EXPERT: Add preconditions]
++    // - All file IDs exist
++    // - rootFileId is MD type
++    // - unitFileId is UNIT type
++    // - dafnyFileId is DFY type
++    // - Line numbers are valid
++    ensures ValidState(newState.state)
++    // [EXPERT: Add postconditions]
++  {
++    // [EXPERT: Implement full logic]
++    (state, false)
++  }
++
++  // --- Test Generation ---
++  method GenerateTests() returns (testCases: seq<(SystemStateWithLinks, UUID, UUID, UUID, nat, nat, SystemStateWithLinks, bool)>)
++  {
++    // [EXPERT: Add concrete test cases]
++    testCases := [];
++  }
++}
+diff --git a/scripts/generate_test_vectors.py b/scripts/generate_test_vectors.py
+new file mode 100644
+index 0000000..40fe9d3
+--- /dev/null
++++ b/scripts/generate_test_vectors.py
+@@ -0,0 +1,199 @@
++"""
++Test vector generation: Extract concrete test cases from Dafny GenerateTests() methods.
++Uses Dafny /mv flag to generate model values from concrete instances.
++"""
++
++import subprocess
++import json
++import logging
++from pathlib import Path
++from typing import List, Dict, Any, Optional
++
++logger = logging.getLogger(__name__)
++
++
++def run_dafny_model_values(
++    dafny_file: str,
++    method_name: str = "GenerateTests",
++    docker_service: str = "api"
++) -> Optional[str]:
++    """
++    Run Dafny with /mv flag to generate model values from GenerateTests() method.
++    
++    Args:
++        dafny_file: Path to Dafny file
++        method_name: Name of test generation method
++        docker_service: Docker Compose service name
++    
++    Returns:
++        Model values output as string, or None if error
++    """
++    cmd = [
++        "docker-compose",
++        "exec",
++        "-T",
++        docker_service,
++        "dafny",
++        "verify",
++        "/mv",
++        dafny_file
++    ]
++    
++    try:
++        result = subprocess.run(
++            cmd,
++            capture_output=True,
++            text=True,
++            timeout=300
++        )
++        
++        if result.returncode != 0:
++            logger.error(f"Dafny model values generation failed: {result.stderr}")
++            return None
++        
++        return result.stdout
++    
++    except subprocess.TimeoutExpired:
++        logger.error("Dafny model values generation timed out")
++        return None
++    except Exception as e:
++        logger.error(f"Error running Dafny model values: {e}")
++        return None
++
++
++def parse_model_values(output: str) -> List[Dict[str, Any]]:
++    """
++    Parse Dafny model values output to extract test vectors.
++    
++    Args:
++        output: Dafny /mv output
++    
++    Returns:
++        List of test vector dictionaries
++    """
++    # TODO: Implement proper parsing of Dafny model values format
++    # This is a placeholder - actual format depends on Dafny version
++    
++    test_vectors = []
++    
++    # Simple extraction: look for test case patterns
++    # Actual implementation needs to parse Dafny's model value format
++    
++    lines = output.split('\n')
++    current_vector = {}
++    
++    for line in lines:
++        if "TestCase" in line or "testCases" in line:
++            # Extract test case data
++            # This is a simplified parser - needs refinement
++            pass
++    
++    return test_vectors
++
++
++def export_test_vectors_json(
++    test_vectors: List[Dict[str, Any]],
++    output_path: str
++) -> None:
++    """
++    Export test vectors to JSON file.
++    
++    Args:
++        test_vectors: List of test vector dictionaries
++        output_path: Path to output JSON file
++    """
++    with open(output_path, 'w', encoding='utf-8') as f:
++        json.dump(test_vectors, f, indent=2, default=str)
++    
++    logger.info(f"Exported {len(test_vectors)} test vectors to {output_path}")
++
++
++def generate_pytest_file(
++    test_vectors: List[Dict[str, Any]],
++    output_path: str,
++    module_name: str
++) -> None:
++    """
++    Generate pytest-compatible test file from test vectors.
++    
++    Args:
++        test_vectors: List of test vector dictionaries
++        output_path: Path to output Python test file
++        module_name: Name of module being tested
++    """
++    test_code = f'''"""
++Oracle tests for {module_name}.
++Generated from Dafny GenerateTests() method.
++"""
++
++import pytest
++from api.core import {module_name}
++
++
++@pytest.mark.parametrize("test_vector", [
++'''
++    
++    for i, vector in enumerate(test_vectors):
++        test_code += f"    {json.dumps(vector, default=str)},\n"
++    
++    test_code += '''])
++def test_oracle(test_vector):
++    """
++    Oracle test: Verify Python implementation matches Dafny specification.
++    """
++    # TODO: Implement test logic
++    # Extract inputs from test_vector
++    # Call Python function
++    # Compare output with expected result from Dafny
++    pass
++'''
++    
++    with open(output_path, 'w', encoding='utf-8') as f:
++        f.write(test_code)
++    
++    logger.info(f"Generated pytest file: {output_path}")
++
++
++def main():
++    """Main entry point for test vector generation."""
++    import argparse
++    
++    parser = argparse.ArgumentParser(description="Generate test vectors from Dafny specs")
++    parser.add_argument("dafny_file", help="Path to Dafny specification file")
++    parser.add_argument("--method", default="GenerateTests", help="Test generation method name")
++    parser.add_argument("--output-json", help="Output JSON file path", default=None)
++    parser.add_argument("--output-pytest", help="Output pytest file path", default=None)
++    parser.add_argument("--module", help="Python module name for pytest generation", default=None)
++    parser.add_argument("--docker-service", default="api", help="Docker Compose service name")
++    
++    args = parser.parse_args()
++    
++    # Run Dafny model values generation
++    logger.info(f"Generating model values from {args.dafny_file}")
++    output = run_dafny_model_values(args.dafny_file, args.method, args.docker_service)
++    
++    if not output:
++        logger.error("Failed to generate model values")
++        return 1
++    
++    # Parse test vectors
++    test_vectors = parse_model_values(output)
++    
++    if not test_vectors:
++        logger.warning("No test vectors extracted")
++        return 1
++    
++    # Export JSON
++    if args.output_json:
++        export_test_vectors_json(test_vectors, args.output_json)
++    
++    # Generate pytest file
++    if args.output_pytest and args.module:
++        generate_pytest_file(test_vectors, args.output_pytest, args.module)
++    
++    return 0
++
++
++if __name__ == "__main__":
++    logging.basicConfig(level=logging.INFO)
++    exit(main())
+diff --git a/scripts/synthesize_core.py b/scripts/synthesize_core.py
+new file mode 100644
+index 0000000..70c092b
+--- /dev/null
++++ b/scripts/synthesize_core.py
+@@ -0,0 +1,202 @@
++"""
++LLM-based Python code generation from Dafny specs.
++Synthesis script for generating Python Core functions from Dafny specifications.
++
++This script uses the manual migration.py as a "few-shot" example to guide synthesis.
++"""
++
++import os
++import sys
++from pathlib import Path
++from typing import Optional
++import logging
++
++# Add parent directory to path for imports
++sys.path.insert(0, str(Path(__file__).parent.parent))
++
++logger = logging.getLogger(__name__)
++
++
++def load_dafny_spec(spec_path: str) -> str:
++    """
++    Load Dafny specification file.
++    
++    Args:
++        spec_path: Path to .dfy file
++    
++    Returns:
++        File contents as string
++    """
++    with open(spec_path, 'r', encoding='utf-8') as f:
++        return f.read()
++
++
++def load_few_shot_example() -> str:
++    """
++    Load manual synthesis example (migration.py) as few-shot template.
++    
++    Returns:
++        Example Python code matching Dafny spec
++    """
++    example_path = Path(__file__).parent.parent / "api" / "core" / "migration.py"
++    with open(example_path, 'r', encoding='utf-8') as f:
++        return f.read()
++
++
++def extract_function_signature(dafny_code: str, function_name: str) -> Optional[str]:
++    """
++    Extract function signature from Dafny code.
++    
++    Args:
++        dafny_code: Dafny source code
++        function_name: Name of function to extract
++    
++    Returns:
++        Function signature string or None if not found
++    """
++    # Simple extraction: look for function declaration
++    lines = dafny_code.split('\n')
++    in_function = False
++    signature_lines = []
++    
++    for line in lines:
++        if f"function {function_name}" in line:
++            in_function = True
++            signature_lines.append(line.strip())
++        elif in_function:
++            if '{' in line:
++                break
++            signature_lines.append(line.strip())
++    
++    return '\n'.join(signature_lines) if signature_lines else None
++
++
++def generate_llm_prompt(
++    dafny_spec: str,
++    function_name: str,
++    target_module: str,
++    few_shot_example: str
++) -> str:
++    """
++    Generate LLM prompt for Python synthesis.
++    
++    Args:
++        dafny_spec: Complete Dafny specification
++        function_name: Name of function to synthesize
++        target_module: Target Python module name (e.g., "file_operations")
++        few_shot_example: Manual synthesis example code
++    
++    Returns:
++        Formatted prompt string
++    """
++    prompt = f"""You are a code synthesis tool that translates Dafny specifications to Python.
++
++Your task is to generate a Python function matching the Dafny specification exactly.
++
++## Dafny Specification:
++```dafny
++{dafny_spec}
++```
++
++## Target Function:
++{function_name}
++
++## Few-Shot Example (Manual Synthesis):
++```python
++{few_shot_example}
++```
++
++## Requirements:
++1. Match the Dafny function signature exactly
++2. Use icontract decorators matching Dafny pre/postconditions
++3. Pure function: no side effects, no database access
++4. Use immutable SystemState models from api.core.models
++5. Return new SystemState (immutable update pattern)
++6. Include docstring referencing Dafny spec location
++
++## Output Format:
++Generate only the Python function code, including:
++- Import statements needed
++- @icontract decorators
++- Function implementation
++- Docstring
++
++Do not include any explanation or markdown formatting.
++"""
++    return prompt
++
++
++def synthesize_python_code(
++    dafny_spec_path: str,
++    function_name: str,
++    target_module: str,
++    llm_api_key: Optional[str] = None,
++    llm_provider: str = "openai"
++) -> str:
++    """
++    Synthesize Python code from Dafny spec using LLM.
++    
++    Args:
++        dafny_spec_path: Path to Dafny .dfy file
++        function_name: Name of function to synthesize
++        target_module: Target Python module name
++        llm_api_key: API key for LLM provider
++        llm_provider: LLM provider ("openai", "gemini", "anthropic")
++    
++    Returns:
++        Generated Python code
++    
++    Note:
++        This is a skeleton - actual LLM integration needs to be implemented.
++    """
++    # Load inputs
++    dafny_spec = load_dafny_spec(dafny_spec_path)
++    few_shot_example = load_few_shot_example()
++    
++    # Generate prompt
++    prompt = generate_llm_prompt(dafny_spec, function_name, target_module, few_shot_example)
++    
++    # TODO: Call LLM API
++    # For now, return placeholder
++    logger.warning("LLM synthesis not yet implemented - returning placeholder")
++    
++    return f"""# Generated from {dafny_spec_path} :: {function_name}
++# TODO: Implement LLM synthesis
++# Prompt generated: {len(prompt)} characters
++"""
++
++
++def main():
++    """Main entry point for synthesis script."""
++    import argparse
++    
++    parser = argparse.ArgumentParser(description="Synthesize Python code from Dafny specs")
++    parser.add_argument("dafny_spec", help="Path to Dafny specification file")
++    parser.add_argument("function_name", help="Name of function to synthesize")
++    parser.add_argument("target_module", help="Target Python module name")
++    parser.add_argument("--output", help="Output file path", default=None)
++    parser.add_argument("--llm-provider", choices=["openai", "gemini", "anthropic"], default="openai")
++    parser.add_argument("--llm-api-key", help="LLM API key", default=None)
++    
++    args = parser.parse_args()
++    
++    # Synthesize code
++    python_code = synthesize_python_code(
++        args.dafny_spec,
++        args.function_name,
++        args.target_module,
++        llm_api_key=args.llm_api_key,
++        llm_provider=args.llm_provider
++    )
++    
++    # Write output
++    if args.output:
++        with open(args.output, 'w', encoding='utf-8') as f:
++            f.write(python_code)
++        print(f"Generated code written to {args.output}")
++    else:
++        print(python_code)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/verify_dafny.sh b/scripts/verify_dafny.sh
+new file mode 100644
+index 0000000..385fd56
+--- /dev/null
++++ b/scripts/verify_dafny.sh
+@@ -0,0 +1,24 @@
++#!/bin/bash
++# Verify Dafny files using Docker container
++# Usage: ./scripts/verify_dafny.sh api/verification/models.dfy
++
++set -e
++
++# Check if docker-compose is available
++if ! command -v docker-compose &> /dev/null; then
++    echo "Error: docker-compose not found. Please install Docker Compose."
++    exit 1
++fi
++
++# Check if files are provided
++if [ $# -eq 0 ]; then
++    echo "Usage: $0 <dafny_file1> [dafny_file2] ..."
++    echo "Example: $0 api/verification/models.dfy api/verification/project_migration.dfy"
++    exit 1
++fi
++
++# Run Dafny verification inside Docker container
++echo "Verifying Dafny files via Docker container..."
++docker-compose exec -T api dafny verify "$@"
++
++echo "Verification complete."
+diff --git a/tests/oracle/__init__.py b/tests/oracle/__init__.py
+new file mode 100644
+index 0000000..015c207
+--- /dev/null
++++ b/tests/oracle/__init__.py
+@@ -0,0 +1,3 @@
++"""
++Oracle test infrastructure for Guardian Gateway.
++"""
+diff --git a/tests/oracle/test_core_oracle.py b/tests/oracle/test_core_oracle.py
+new file mode 100644
+index 0000000..b997fc9
+--- /dev/null
++++ b/tests/oracle/test_core_oracle.py
+@@ -0,0 +1,143 @@
++"""
++Oracle test infrastructure for Guardian Gateway.
++Tests that Python Core implementations match Dafny specifications.
++
++Oracle tests load test vectors generated from Dafny GenerateTests() methods
++and verify that Python implementations produce the same results.
++"""
++
++import pytest
++import json
++from pathlib import Path
++from typing import Dict, Any, List
++
++# Import Core modules
++from api.core import models, migration
++
++
++def load_test_vectors(json_path: str) -> List[Dict[str, Any]]:
++    """
++    Load test vectors from JSON file.
++    
++    Args:
++        json_path: Path to test vectors JSON file
++    
++    Returns:
++        List of test vector dictionaries
++    """
++    with open(json_path, 'r', encoding='utf-8') as f:
++        return json.load(f)
++
++
++class TestMigrationOracle:
++    """Oracle tests for migration logic."""
++    
++    @pytest.fixture
++    def test_vectors_path(self):
++        """Path to migration test vectors JSON file."""
++        return Path(__file__).parent / "test_vectors_migration.json"
++    
++    @pytest.mark.skipif(
++        not (Path(__file__).parent / "test_vectors_migration.json").exists(),
++        reason="Test vectors not generated yet"
++    )
++    def test_migrate_anonymous_projects(self, test_vectors_path):
++        """
++        Oracle test: Verify migrate_anonymous_projects matches Dafny spec.
++        
++        Loads test vectors from Dafny GenerateTests() and verifies Python
++        implementation produces identical results.
++        """
++        test_vectors = load_test_vectors(str(test_vectors_path))
++        
++        for vector in test_vectors:
++            # Extract inputs from test vector
++            # Format: (SystemState, userId, sessionHash, expectedState)
++            old_state_dict = vector[0]
++            user_id = vector[1]
++            session_hash = vector[2]
++            expected_state_dict = vector[3]
++            
++            # Convert dicts to SystemState objects
++            # TODO: Implement conversion from JSON to SystemState
++            # old_state = models.SystemState.from_dict(old_state_dict)
++            # expected_state = models.SystemState.from_dict(expected_state_dict)
++            
++            # Call Python function
++            # new_state = migration.migrate_anonymous_projects(
++            #     old_state, user_id, session_hash
++            # )
++            
++            # Verify result matches expected
++            # assert new_state == expected_state
++            
++            # Placeholder: skip actual test until conversion is implemented
++            pytest.skip("SystemState JSON conversion not yet implemented")
++
++
++class TestFileOperationsOracle:
++    """Oracle tests for file operations."""
++    
++    @pytest.mark.skip(reason="File operations not yet synthesized")
++    def test_save_file(self):
++        """Oracle test for SaveFile function."""
++        pytest.skip("File operations synthesis pending")
++
++
++class TestProjectManagementOracle:
++    """Oracle tests for project management."""
++    
++    @pytest.mark.skip(reason="Project management not yet synthesized")
++    def test_create_project(self):
++        """Oracle test for CreateProject function."""
++        pytest.skip("Project management synthesis pending")
++
++
++def test_state_validation():
++    """
++    Test that SystemState validation matches Dafny ValidState predicate.
++    """
++    # Create valid state
++    project = models.Project(
++        project_id="p1",
++        name="Test",
++        description="",
++        owner=models.Owner.anonymous("hash123"),
++        file_ids={"f1"}
++    )
++    
++    file_obj = models.File(
++        file_id="f1",
++        project_id="p1",
++        filename="test.md",
++        content="content",
++        file_type=models.FileType.MD,
++        size_bytes=7,
++        renamed=False
++    )
++    
++    state = models.SystemState(
++        projects={"p1": project},
++        files={"f1": file_obj}
++    )
++    
++    # Should validate successfully
++    assert state.validate() == True
++    
++    # Create invalid state (file not in project's file_ids)
++    invalid_project = models.Project(
++        project_id="p2",
++        name="Test",
++        description="",
++        owner=models.Owner.anonymous("hash123"),
++        file_ids=set()  # Missing file_id
++    )
++    
++    invalid_state = models.SystemState(
++        projects={"p2": invalid_project},
++        files={"f1": file_obj}  # File references p1, not p2
++    )
++    
++    # Should raise ValueError
++    with pytest.raises(ValueError):
++        invalid_state.validate()

@@ -92,7 +92,7 @@ class GeminiTranspiler:
         # Use Gemini 1.5 Pro for code generation
         self.model = genai.GenerativeModel(
             'gemini-1.5-pro',
-            generation_config={
+            generation_config={  # type: ignore[arg-type]
                 'temperature': 0.1,  # Low temperature for deterministic output
                 'top_p': 0.95,
                 'top_k': 40,
