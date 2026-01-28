@@ -2,15 +2,14 @@
 Pydantic models for API request/response validation
 """
 
+from __future__ import annotations
 from pydantic import BaseModel
 from typing import List, Literal, Optional
 from datetime import datetime
 
 
 # === Stage 1-2: Generation Models ===
-class GenerateSpecRequest(BaseModel):
-    english_spec: str
-    rigor_level: Literal["sanity", "standard", "paranoid"] = "standard"
+# Note: GenerateSpecRequest is defined later with full options
 
 
 class GapLocation(BaseModel):
@@ -62,6 +61,9 @@ class GenerateSpecOptions(BaseModel):
 class GenerateSpecRequest(BaseModel):
     english_spec: str
     options: Optional[GenerateSpecOptions] = None
+    current_filename: Optional[str] = None  # Current filename for suggestion and subfolder naming
+    project_id: Optional[str] = None  # Project ID to save unit files to
+    source_file_id: Optional[str] = None  # Source file ID (if editing existing file)
 
 
 class GenerateSpecResponse(BaseModel):
@@ -72,6 +74,9 @@ class GenerateSpecResponse(BaseModel):
     ambiguities: List[Ambiguity]
     traceability_matrix: List[TraceabilityEntry]
     statistics: SpecStatistics
+    suggested_filename: Optional[str] = None  # Suggested filename if current is generic
+    units_created: Optional[List["UnitInfo"]] = None  # Units created during automatic deconstruction
+    subfolder_name: Optional[str] = None  # Subfolder name where units were created
 
 
 # === Stage 3: Verification Models ===
@@ -111,6 +116,30 @@ class SuggestResponse(BaseModel):
     rationale: str
     original_text: str
     proposed_text: str
+
+
+# === Spec Refinement Models ===
+class FindGapsRequest(BaseModel):
+    spec: str
+    project_id: Optional[str] = None
+    source_file_id: Optional[str] = None
+
+
+class FindGapsResponse(BaseModel):
+    gaps: List[Gap]
+    ambiguities: List[Ambiguity]
+    statistics: SpecStatistics
+
+
+class RefineSpecRequest(BaseModel):
+    spec: str
+    gaps: List[Gap]
+    apply_gap_ids: Optional[List[str]] = None  # If provided, only apply these gaps
+
+
+class RefineSpecResponse(BaseModel):
+    refined_spec: str
+    applied_gaps: List[Gap]
 
 
 # === AI Assistant Models ===
@@ -165,6 +194,7 @@ class FileResponse(BaseModel):
     created_at: str
     updated_at: str
     size_bytes: int
+    renamed: Optional[bool] = False  # Track if file was manually renamed
 
 
 class FileListItem(BaseModel):

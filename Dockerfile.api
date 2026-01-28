@@ -46,6 +46,19 @@ RUN wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh && \
 # Install Dafny as a .NET tool
 RUN dotnet tool install --global dafny
 
+# Install Z3 solver next to Dafny executable (Dafny's expected location)
+# Dafny expects Z3 in a 'z3' directory next to the dafny executable
+# containing bin/z3-4.12.1 (version compatible with Dafny 4.11.0)
+# Note: When Dafny is installed via 'dotnet tool install', Z3 is NOT bundled
+# We must manually download and place it where Dafny expects it
+RUN apt-get update && apt-get install -y unzip curl && rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /root/.dotnet/tools/z3/bin && \
+    curl -L https://github.com/Z3Prover/z3/releases/download/z3-4.12.1/z3-4.12.1-x64-glibc-2.35.zip -o /tmp/z3.zip && \
+    unzip /tmp/z3.zip -d /tmp && \
+    cp /tmp/z3-4.12.1-x64-glibc-2.35/bin/z3 /root/.dotnet/tools/z3/bin/z3-4.12.1 && \
+    chmod +x /root/.dotnet/tools/z3/bin/z3-4.12.1 && \
+    rm -rf /tmp/z3.zip /tmp/z3-4.12.1-x64-glibc-2.35
+
 # Copy Python packages from builder
 COPY --from=builder /root/.local /root/.local
 
@@ -55,8 +68,8 @@ COPY . .
 # Make sure scripts are executable
 RUN chmod +x scripts/*.sh || true
 
-# Add local bin and .NET tools to PATH
-ENV PATH=/root/.local/bin:/root/.dotnet/tools:$PATH
+# Add local bin, .NET tools, and Z3 to PATH
+ENV PATH=/root/.local/bin:/root/.dotnet/tools:/root/.dotnet/tools/z3/bin:$PATH
 
 # Expose port
 EXPOSE 8000

@@ -1,0 +1,36 @@
+name: Quality Gate
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  defense-in-depth:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.9"
+        
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r api/requirements.txt
+        pip install pytest pytest-cov mypy ruff httpx
+        
+    - name: 🛡️ Phase 1: Static Shield (Linting)
+      run: ruff check api/
+      
+    - name: 🛡️ Phase 1: Static Shield (Types)
+      # We ignore missing imports to ensure the build is fast and focuses on OUR code errors
+      run: mypy api/ core/ --ignore-missing-imports --check-untyped-defs
+      
+    - name: 🕸️ Phase 2: Integration Net
+      # Run the test suite. If this fails, the code is rejected.
+      run: pytest tests/
