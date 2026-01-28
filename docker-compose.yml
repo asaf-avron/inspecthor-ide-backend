@@ -35,7 +35,8 @@ services:
       - "127.0.0.1:8000:8000"  # Bind to localhost only - prevents internet scanners
     environment:
       # Database connection
-      DATABASE_URL: postgresql://guardian:${DB_PASSWORD:-guardian_dev_password}@db:5432/guardian_gateway
+      # Use SQLite for persistence (or PostgreSQL: postgresql://guardian:${DB_PASSWORD:-guardian_dev_password}@db:5432/guardian_gateway)
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///./guardian_gateway.db}
 
       # API Configuration
       GEMINI_API_KEY: ${GEMINI_API_KEY}
@@ -63,6 +64,8 @@ services:
       USE_MOCK_GITHUB: ${USE_MOCK_GITHUB:-false}
     volumes:
       - .:/app
+      # Explicit SQLite database persistence - ensures database file persists across container restarts
+      - ./guardian_gateway.db:/app/guardian_gateway.db
     depends_on:
       db:
         condition: service_healthy

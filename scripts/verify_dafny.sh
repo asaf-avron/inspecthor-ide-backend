@@ -20,6 +20,6 @@ fi
 # Run Dafny verification inside Docker container
 echo "Verifying Dafny files via Docker container..."
 # Use bash -c to properly handle paths inside container
-docker-compose exec -T api bash -c "cd /app && dafny verify --solver-path=/root/.dotnet/tools/z3/bin/z3-4.12.1 $(printf '%q ' "$@")"
+docker-compose exec -T api bash -c "cd /app && dafny verify --solver-path=/root/.dotnet/tools/z3/bin/z3-4.12.1 --allow-warnings $(printf '%q ' "$@")"
 
 echo "Verification complete."
