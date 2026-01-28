@@ -122,7 +122,13 @@ class ProjectService:
         self.db.commit()
         
         # Load created project for response
-        project = self.db.query(DBProject).filter(DBProject.project_id == new_project_id).first()
+        # Convert string UUID to UUID object for SQLite compatibility
+        try:
+            new_project_id_uuid = uuid.UUID(new_project_id) if isinstance(new_project_id, str) else new_project_id
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=500, detail="Invalid project ID format")
+        
+        project = self.db.query(DBProject).filter(DBProject.project_id == new_project_id_uuid).first()
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         
@@ -164,9 +170,17 @@ class ProjectService:
             self._migrate_anonymous_projects_to_user(api_key_hash_value)
         
         # Base query: filter by user_id (if authenticated) or api_key_hash (if anonymous)
-        query = self.db.query(DBProject)
+        # Convert string UUID to UUID object for SQLite compatibility
+        user_id_uuid = None
         if user_id:
-            query = query.filter(DBProject.user_id == user_id)
+            try:
+                user_id_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="Invalid user ID format")
+        
+        query = self.db.query(DBProject)
+        if user_id_uuid:
+            query = query.filter(DBProject.user_id == user_id_uuid)
         else:
             query = query.filter(DBProject.api_key_hash == api_key_hash_value)
         
@@ -224,13 +238,27 @@ class ProjectService:
         if self.current_user and api_key_hash_value:
             self._migrate_anonymous_projects_to_user(api_key_hash_value)
         
-        # Load project with ownership check
-        query = self.db.query(DBProject).filter(DBProject.project_id == project_id)
+        # Convert string UUID to UUID object for SQLite compatibility
+        try:
+            project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid project ID format")
+        
+        # Convert string UUID to UUID object for SQLite compatibility (user_id)
+        user_id_uuid = None
         if user_id:
+            try:
+                user_id_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="Invalid user ID format")
+        
+        # Load project with ownership check
+        query = self.db.query(DBProject).filter(DBProject.project_id == project_id_uuid)
+        if user_id_uuid:
             from sqlalchemy import or_
             query = query.filter(
                 or_(
-                    DBProject.user_id == user_id,
+                    DBProject.user_id == user_id_uuid,
                     DBProject.api_key_hash == api_key_hash_value
                 )
             )
@@ -249,8 +277,9 @@ class ProjectService:
             self.db.refresh(project)
         
         # Load all files in one query
+        # project_id_uuid is already converted above
         files = self.db.query(DBFile).filter(
-            DBFile.project_id == project_id
+            DBFile.project_id == project_id_uuid
         ).order_by(DBFile.filename).all()
         
         # Build response
@@ -295,7 +324,13 @@ class ProjectService:
         if self.current_user and api_key_hash_value:
             self._migrate_anonymous_projects_to_user(api_key_hash_value)
         
-        query = self.db.query(DBProject).filter(DBProject.project_id == project_id)
+        # Convert string UUID to UUID object for SQLite compatibility
+        try:
+            project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid project ID format")
+        
+        query = self.db.query(DBProject).filter(DBProject.project_id == project_id_uuid)
         if user_id:
             from sqlalchemy import or_
             query = query.filter(
@@ -318,7 +353,7 @@ class ProjectService:
             self.db.commit()
             self.db.refresh(project)
         
-        file_count = self.db.query(DBFile).filter(DBFile.project_id == project_id).count()
+        file_count = self.db.query(DBFile).filter(DBFile.project_id == project_id_uuid).count()
         
         return ProjectResponse(
             project_id=str(project.project_id),
@@ -352,13 +387,27 @@ class ProjectService:
         if self.current_user and api_key_hash_value:
             self._migrate_anonymous_projects_to_user(api_key_hash_value)
         
-        # Load project with ownership check
-        query = self.db.query(DBProject).filter(DBProject.project_id == project_id)
+        # Convert string UUID to UUID object for SQLite compatibility
+        try:
+            project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid project ID format")
+        
+        # Convert string UUID to UUID object for SQLite compatibility (user_id)
+        user_id_uuid = None
         if user_id:
+            try:
+                user_id_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="Invalid user ID format")
+        
+        # Load project with ownership check
+        query = self.db.query(DBProject).filter(DBProject.project_id == project_id_uuid)
+        if user_id_uuid:
             from sqlalchemy import or_
             query = query.filter(
                 or_(
-                    DBProject.user_id == user_id,
+                    DBProject.user_id == user_id_uuid,
                     DBProject.api_key_hash == api_key_hash_value
                 )
             )
@@ -390,8 +439,16 @@ class ProjectService:
                     func.lower(DBProject.name) == request.name.lower(),
                     DBProject.project_id != project_id
                 )
+                # Convert user_id to UUID if needed
+                user_id_uuid_for_check = None
                 if user_id:
-                    existing_query = existing_query.filter(DBProject.user_id == user_id)
+                    try:
+                        user_id_uuid_for_check = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+                    except (ValueError, TypeError):
+                        raise HTTPException(status_code=400, detail="Invalid user ID format")
+                
+                if user_id_uuid_for_check:
+                    existing_query = existing_query.filter(DBProject.user_id == user_id_uuid_for_check)
                 else:
                     existing_query = existing_query.filter(DBProject.api_key_hash == api_key_hash_value)
                 
@@ -413,7 +470,7 @@ class ProjectService:
         self.db.refresh(project)
         
         # Get file count
-        file_count = self.db.query(DBFile).filter(DBFile.project_id == project_id).count()
+        file_count = self.db.query(DBFile).filter(DBFile.project_id == project_id_uuid).count()
         
         return ProjectResponse(
             project_id=str(project.project_id),

@@ -12,6 +12,7 @@ from typing import Optional
 import httpx
 import os
 import logging
+import uuid
 from jose import JWTError, jwt
 from cryptography.fernet import Fernet
 
@@ -93,7 +94,15 @@ async def get_current_user(
         if not user_id:
             return None
         
-        user = db.query(User).filter(User.user_id == user_id).first()
+        # Convert string UUID to UUID object for SQLite compatibility
+        # JWT tokens contain UUIDs as strings, but SQLAlchemy UUID columns
+        # with as_uuid=True require UUID objects when using SQLite
+        try:
+            user_id_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+        except (ValueError, TypeError):
+            return None
+        
+        user = db.query(User).filter(User.user_id == user_id_uuid).first()
         return user
     except HTTPException:
         return None
@@ -324,8 +333,14 @@ async def refresh_access_token(
     payload = verify_token(refresh_token, "refresh")
     user_id = payload.get("sub")
     
+    # Convert string UUID to UUID object for SQLite compatibility
+    try:
+        user_id_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Invalid user ID")
+    
     # Get user from database
-    user = db.query(User).filter(User.user_id == user_id).first()
+    user = db.query(User).filter(User.user_id == user_id_uuid).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     

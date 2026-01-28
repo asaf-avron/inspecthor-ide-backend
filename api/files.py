@@ -166,7 +166,13 @@ async def save_file(
     db.commit()
     
     # Load created file for response
-    db_file = db.query(DBFile).filter(DBFile.file_id == new_file_id).first()
+    # Convert string UUID to UUID object for SQLite compatibility
+    try:
+        new_file_id_uuid = uuid.UUID(new_file_id) if isinstance(new_file_id, str) else new_file_id
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=500, detail="Invalid file ID format")
+    
+    db_file = db.query(DBFile).filter(DBFile.file_id == new_file_id_uuid).first()
     
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
@@ -193,8 +199,15 @@ async def get_file(
     
     # Join with project to verify ownership
     owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
+    
+    # Convert string UUID to UUID object for SQLite compatibility
+    try:
+        file_id_uuid = uuid.UUID(file_id) if isinstance(file_id, str) else file_id
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid file ID format")
+    
     db_file = db.query(DBFile).join(DBProject).filter(
-        DBFile.file_id == file_id,
+        DBFile.file_id == file_id_uuid,
         owner_filter
     ).first()
     
@@ -233,7 +246,12 @@ async def list_files(
     query = db.query(DBFile).join(DBProject).filter(owner_filter)
     
     if project_id:
-        query = query.filter(DBFile.project_id == project_id)
+        # Convert string UUID to UUID object for SQLite compatibility
+        try:
+            project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid project ID format")
+        query = query.filter(DBFile.project_id == project_id_uuid)
     if file_type:
         query = query.filter(DBFile.file_type == file_type)
     
@@ -267,7 +285,7 @@ async def list_files(
     "Preconditions: Valid file_id, non-empty content, db session exists"
 )
 @icontract.ensure(
-    lambda result, file_id, request, api_key, db, current_user, OLD:
+    lambda result, file_id, request, api_key, db, current_user:
         result is not None and
         result.file_id == file_id and
         result.content == request.content,
@@ -299,7 +317,13 @@ async def update_file(
         raise HTTPException(status_code=403, detail="Authentication required")
     
     # 1. I/O: Load file to get project_id, then load scoped state
-    db_file = db.query(DBFile).filter(DBFile.file_id == file_id).first()
+    # Convert string UUID to UUID object for SQLite compatibility
+    try:
+        file_id_uuid = uuid.UUID(file_id) if isinstance(file_id, str) else file_id
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid file ID format")
+    
+    db_file = db.query(DBFile).filter(DBFile.file_id == file_id_uuid).first()
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
     
@@ -380,7 +404,13 @@ async def delete_file(
         raise HTTPException(status_code=403, detail="Authentication required")
     
     # 1. I/O: Load file to get project_id, then load scoped state
-    db_file = db.query(DBFile).filter(DBFile.file_id == file_id).first()
+    # Convert string UUID to UUID object for SQLite compatibility
+    try:
+        file_id_uuid = uuid.UUID(file_id) if isinstance(file_id, str) else file_id
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid file ID format")
+    
+    db_file = db.query(DBFile).filter(DBFile.file_id == file_id_uuid).first()
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
     
