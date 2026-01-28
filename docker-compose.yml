@@ -30,6 +30,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+    image: guardian-gateway-api:latest
     container_name: guardian-api
     ports:
       - "127.0.0.1:8000:8000"  # Bind to localhost only - prevents internet scanners
