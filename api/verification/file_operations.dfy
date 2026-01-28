@@ -36,14 +36,15 @@ module FileOperations {
     requires |content| < 1000000 // Example size limit
     
     // Postconditions (Guarantees)
-    ensures ValidState(result.0)
-    ensures result.1.Success? ==> 
+    ensures ValidState(SaveFile(s, newFileId, projectId, filename, content, fileType, ownerId).0)
+    ensures var res := SaveFile(s, newFileId, projectId, filename, content, fileType, ownerId);
+             res.1.Success? ==> 
       // File created correctly
-      result.1.value == newFileId &&
-      newFileId in result.0.files &&
-      result.0.files[newFileId] == File(newFileId, projectId, filename, content, fileType, |content|, false) &&
+      res.1.value == newFileId &&
+      newFileId in res.0.files &&
+      res.0.files[newFileId] == File(newFileId, projectId, filename, content, fileType, |content|, false) &&
       // Project updated
-      newFileId in result.0.projects[projectId].fileIds
+      newFileId in res.0.projects[projectId].fileIds
   {
     if !(projectId in s.projects) then (s, Failure("Project not found"))
     else if !FilenameUnique(s, projectId, filename) then (s, Failure("Filename exists"))
@@ -72,7 +73,7 @@ module FileOperations {
     requires fileId in s.files
     requires var pid := s.files[fileId].projectId;
              pid in s.projects && (s.projects[pid].owner == Authenticated(ownerId) || s.projects[pid].owner == Anonymous(ownerId))
-    ensures ValidState(result.0)
+    ensures ValidState(UpdateFile(s, fileId, newContent, newFilename, ownerId).0)
   {
     var oldFile := s.files[fileId];
     var pid := oldFile.projectId;
@@ -104,8 +105,9 @@ module FileOperations {
     requires fileId in s.files
     requires var pid := s.files[fileId].projectId;
              pid in s.projects && (s.projects[pid].owner == Authenticated(ownerId) || s.projects[pid].owner == Anonymous(ownerId))
-    ensures ValidState(result.0)
-    ensures result.1.Success? ==> fileId !in result.0.files
+    ensures ValidState(DeleteFile(s, fileId, ownerId).0)
+    ensures var res := DeleteFile(s, fileId, ownerId);
+             res.1.Success? ==> fileId !in res.0.files
   {
     var pid := s.files[fileId].projectId;
     
