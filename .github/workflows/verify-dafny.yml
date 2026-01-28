@@ -1,4 +1,5 @@
 name: Verify Dafny Specifications
+# Cache test: Second build to verify cache is working
 
 on:
   push:
