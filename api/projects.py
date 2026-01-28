@@ -9,6 +9,7 @@ from sqlalchemy import func
 from typing import Optional
 from datetime import datetime
 import logging
+import icontract
 
 from api.database import get_db, hash_api_key, Project as DBProject, File as DBFile, User
 from api.models import (
@@ -22,6 +23,7 @@ from api.models import (
     FileMetadata,
 )
 from api.auth import get_current_user
+from api.core import adapters, migration
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -71,6 +73,19 @@ def get_project_owner_id(
     return (None, None)
 
 
+@icontract.require(
+    lambda user, api_key_hash_value, db:
+        user is not None and
+        api_key_hash_value is not None and
+        len(api_key_hash_value) > 0 and
+        db is not None,
+    "Preconditions: user must be authenticated, api_key_hash must be valid, db session must exist"
+)
+@icontract.ensure(
+    lambda result, user, api_key_hash_value, db, OLD:
+        result >= 0,
+    "Postconditions: return value >= 0 (number of migrated projects)"
+)
 def migrate_anonymous_projects_to_user(
     user: User,
     api_key_hash_value: str,
@@ -80,25 +95,44 @@ def migrate_anonymous_projects_to_user(
     Migrate anonymous projects (created with api_key_hash) to authenticated user.
     This happens when a user logs in and has projects created before authentication.
     Returns the number of projects migrated.
-    """
-    # Find projects that match the current session's api_key_hash but don't have a user_id
-    # These are projects created anonymously before the user logged in
-    projects_to_migrate = db.query(DBProject).filter(
-        DBProject.api_key_hash == api_key_hash_value,
-        DBProject.user_id.is_(None)
-    ).all()
     
-    if not projects_to_migrate:
+    Refactored to use Functional Core / Imperative Shell architecture:
+    - Shell (I/O): Fetch state, apply diff, commit
+    - Core (Logic): Pure migration function matching Dafny spec
+    
+    See: api/verification/project_migration.dfy :: MigrateAnonymousProjects
+    See: api/core/migration.py :: migrate_anonymous_projects
+    """
+    # 1. I/O: Fetch snapshot (all projects and files for full state)
+    projects = db.query(DBProject).all()
+    files = db.query(DBFile).all()
+    
+    # 2. ADAPTER: Build SystemState from SQLAlchemy objects
+    old_state = adapters.build_system_state(projects, files)
+    
+    # Count projects that will be migrated (before migration)
+    projects_to_migrate = [
+        p for p in projects
+        if p.api_key_hash == api_key_hash_value and p.user_id is None
+    ]
+    migrated_count = len(projects_to_migrate)
+    
+    if migrated_count == 0:
         return 0
     
-    # Migrate them to the authenticated user
-    migrated_count = 0
-    for project in projects_to_migrate:
-        project.user_id = user.user_id
-        # Keep api_key_hash for backward compatibility, but user_id takes precedence
-        migrated_count += 1
+    # 3. CORE: Call pure logic (matches Dafny MigrateAnonymousProjects)
+    new_state = migration.migrate_anonymous_projects(
+        old_state,
+        str(user.user_id),
+        api_key_hash_value
+    )
     
+    # 4. ADAPTER: Apply state diff back to database
+    adapters.apply_state_diff(db, old_state, new_state)
+    
+    # 5. I/O: Commit changes
     db.commit()
+    
     logger.info(f"Migrated {migrated_count} anonymous projects to user {user.user_id}")
     return migrated_count
 
@@ -449,6 +483,20 @@ async def update_project(
     )
 
 
+@icontract.require(
+    lambda project_id, api_key, db, current_user:
+        project_id is not None and
+        len(project_id) > 0 and
+        db is not None,
+    "Preconditions: Valid project_id, db session exists"
+)
+@icontract.ensure(
+    lambda result, project_id, api_key, db, current_user, OLD:
+        result is not None and
+        result.deleted == True and
+        result.project_id == project_id,
+    "Postconditions: Project deleted successfully"
+)
 @router.delete("/{project_id}", response_model=ProjectDeleteResponse)
 async def delete_project(
     project_id: str,

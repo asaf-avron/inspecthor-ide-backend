@@ -1,0 +1,40 @@
+name: Verify Dafny Specifications
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'api/verification/**/*.dfy'
+      - '.github/workflows/verify-dafny.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'api/verification/**/*.dfy'
+      - '.github/workflows/verify-dafny.yml'
+  workflow_dispatch:
+
+jobs:
+  verify-dafny:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        run: |
+          docker-compose build api
+      
+      - name: Verify Dafny specifications
+        run: |
+          # Verify all Dafny files in api/verification/
+          docker-compose run --rm api dafny verify api/verification/*.dfy
+      
+      - name: Check verification results
+        if: failure()
+        run: |
+          echo "Dafny verification failed. Please check the output above."
+          exit 1
