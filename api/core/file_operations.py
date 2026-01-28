@@ -55,7 +55,7 @@ def _check_ownership(state: SystemState, project_id: str, owner_id: str) -> bool
     "Preconditions: Valid state, non-empty filename, unique ID, project exists and owned, filename unique, content size < 1MB"
 )
 @icontract.ensure(
-    lambda result, state, new_file_id, project_id, filename, content, file_type, owner_id, OLD:
+    lambda result, state, new_file_id, project_id, filename, content, file_type, owner_id:
         result[0].validate() and
         (result[1].success == True) == (new_file_id in result[0].files and new_file_id in result[0].projects[project_id].file_ids),
     "Postconditions: Valid state, file created iff success"
@@ -139,7 +139,7 @@ def save_file_core(
     "Preconditions: Valid state, file exists"
 )
 @icontract.ensure(
-    lambda result, state, file_id, new_content, new_filename, owner_id, OLD:
+    lambda result, state, file_id, new_content, new_filename, owner_id:
         result[0].validate(),
     "Postconditions: Valid state"
 )
@@ -212,7 +212,7 @@ def update_file_core(
     "Preconditions: Valid state, file exists"
 )
 @icontract.ensure(
-    lambda result, state, file_id, owner_id, OLD:
+    lambda result, state, file_id, owner_id:
         result[0].validate() and
         (result[1].success == True) == (file_id not in result[0].files),
     "Postconditions: Valid state, file deleted iff success"
