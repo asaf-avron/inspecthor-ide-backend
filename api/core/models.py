@@ -179,3 +179,33 @@ class SystemState:
             new_projects = self.projects
         
         return SystemState(projects=new_projects, files=new_files)
+
+
+@dataclass(frozen=True)
+class Result:
+    """
+    Typed result matching Oracle's error kind mapping.
+    Enables Shell to map Core failures to HTTP status codes.
+    """
+    success: bool
+    value: Optional[Any] = None
+    error_kind: Optional[str] = None  # NotFound, Unauthorized, Conflict, Precondition
+    error_message: Optional[str] = None
+    
+    @classmethod
+    def success(cls, value: Any) -> "Result":
+        """Create successful result."""
+        return cls(success=True, value=value)
+    
+    @classmethod
+    def failure(cls, kind: str, message: str) -> "Result":
+        """
+        Create failure result with error kind.
+        
+        Error kinds:
+        - NotFound: Resource (project/file) not found in state
+        - Unauthorized: Owner mismatch (403)
+        - Conflict: Uniqueness violation (409)
+        - Precondition: Input validation failure (400)
+        """
+        return cls(success=False, error_kind=kind, error_message=message)
