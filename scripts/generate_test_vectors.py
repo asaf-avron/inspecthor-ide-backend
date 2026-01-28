@@ -168,19 +168,26 @@ def main():
     
     args = parser.parse_args()
     
-    # Run Dafny model values generation
-    logger.info(f"Generating model values from {args.dafny_file}")
-    output = run_dafny_model_values(args.dafny_file, args.method, args.docker_service)
+    # Run Dafny GenerateTests() and capture JSON output
+    logger.info(f"Running GenerateTests() from {args.dafny_file}")
+    output = run_dafny_generate_tests(args.dafny_file, args.docker_service)
     
     if not output:
-        logger.error("Failed to generate model values")
+        logger.error("Failed to run Dafny GenerateTests()")
         return 1
     
-    # Parse test vectors
-    test_vectors = parse_model_values(output)
+    # Extract JSON from output
+    json_data = extract_json_from_output(output)
+    
+    if not json_data:
+        logger.error("Failed to extract JSON from Dafny output")
+        return 1
+    
+    # Parse test vectors from JSON
+    test_vectors = parse_test_vectors(json_data)
     
     if not test_vectors:
-        logger.warning("No test vectors extracted")
+        logger.warning("No test vectors found in JSON")
         return 1
     
     # Export JSON

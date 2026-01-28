@@ -23,11 +23,32 @@ from api.models import (
     FileMetadata,
 )
 from api.auth import get_current_user
-from api.core import adapters, migration
+from api.core import adapters, migration, project_management
+from api.core.models import Owner
+import uuid
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 logger = logging.getLogger(__name__)
+
+
+def map_error_to_status(error_kind: str) -> int:
+    """
+    Map Core error kind to HTTP status code (Oracle's mapping table).
+    
+    Mapping:
+    - NotFound → 404
+    - Unauthorized → 403
+    - Conflict → 409
+    - Precondition → 400
+    """
+    mapping = {
+        "NotFound": 404,
+        "Unauthorized": 403,
+        "Conflict": 409,
+        "Precondition": 400
+    }
+    return mapping.get(error_kind, 500)
 
 
 def get_api_key_from_header(
@@ -71,6 +92,27 @@ def get_project_owner_id(
         return (None, api_key_hash_value)
     
     return (None, None)
+
+
+def get_project_owner_filter(user: Optional[User] = None, api_key_hash_value: Optional[str] = None):
+    """
+    Get SQLAlchemy filter for project ownership.
+    Returns a filter that checks user_id (if authenticated) or api_key_hash (if anonymous).
+    For authenticated users, also checks api_key_hash to include projects created before user auth was implemented.
+    """
+    from sqlalchemy import or_
+    if user:
+        # Check both user_id and api_key_hash for authenticated users (migration support)
+        return or_(
+            DBProject.user_id == user.user_id,
+            DBProject.api_key_hash == api_key_hash_value
+        )
+    elif api_key_hash_value:
+        return DBProject.api_key_hash == api_key_hash_value
+    else:
+        # Should not happen, but return a filter that matches nothing
+        from sqlalchemy import false
+        return false()
 
 
 @icontract.require(
@@ -145,58 +187,67 @@ async def create_project(
     current_user = Depends(get_current_user)
 ):
     """
-    Create a new project and bootstrap initial README.md file.
+    Create a new project.
     Returns project details with redirect_url for frontend navigation.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
     
+    Refactored to use Functional Core / Imperative Shell architecture.
+    """
     user_id, api_key_hash_value = get_project_owner_id(current_user, api_key, db)
     
     logger.info(f"Creating project: name='{request.name}', user_id={user_id}, api_key_hash={api_key_hash_value[:20] if api_key_hash_value else None}")
     
-    # Validate name - Pydantic should handle None, but check for empty string
+    # Validate name
     if not request.name:
-        logger.warning("No project name provided")
         raise HTTPException(status_code=400, detail="Project name is required")
     
     name_trimmed = request.name.strip()
     if len(name_trimmed) == 0:
-        logger.warning("Empty project name provided")
         raise HTTPException(status_code=400, detail="Project name cannot be empty")
     
     if len(name_trimmed) > 255:
-        logger.warning(f"Project name too long: {len(name_trimmed)} characters")
         raise HTTPException(status_code=400, detail="Invalid name length (1-255 characters)")
     
-    # Check for existing project (case-insensitive) - check by user_id or api_key_hash
-    query = db.query(DBProject).filter(func.lower(DBProject.name) == name_trimmed.lower())
-    if user_id:
-        query = query.filter(DBProject.user_id == user_id)
-    else:
-        query = query.filter(DBProject.api_key_hash == api_key_hash_value)
-    
-    existing = query.first()
-    
-    if existing:
-        logger.warning(f"Duplicate project name: '{name_trimmed}'")
-        raise HTTPException(status_code=400, detail="Project name already exists")
-    
     # Validate description length
-    if request.description and len(request.description) > 1000:
-        logger.warning(f"Description too long: {len(request.description)} characters")
+    description = request.description or ""
+    if len(description) > 1000:
         raise HTTPException(status_code=400, detail="Description too long (max 1000 characters)")
     
-    # Create project (use trimmed name) - empty, no auto-generated files
-    project = DBProject(
-        name=name_trimmed,
-        description=request.description,
-        user_id=user_id,
-        api_key_hash=api_key_hash_value
+    # Determine owner
+    if user_id:
+        owner = Owner.authenticated(user_id)
+    elif api_key_hash_value:
+        owner = Owner.anonymous(api_key_hash_value)
+    else:
+        raise HTTPException(status_code=403, detail="Authentication required")
+    
+    # 1. I/O: Load all projects owned by this owner for uniqueness check
+    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
+    state = adapters.build_scoped_state(
+        project_id=None,  # Load all projects for this owner
+        owner_filter=owner_filter,
+        db=db
     )
-    db.add(project)
+    
+    # 2. CORE: Generate UUID and call pure logic
+    new_project_id = str(uuid.uuid4())
+    new_state, result = project_management.create_project_core(
+        state,
+        new_project_id,
+        name_trimmed,
+        description,
+        owner
+    )
+    
+    # 3. ADAPTER: Apply diff and map errors
+    if not result.success:
+        status_code = map_error_to_status(result.error_kind or "Precondition")
+        raise HTTPException(status_code=status_code, detail=result.error_message)
+    
+    adapters.apply_state_diff(db, state, new_state)
     db.commit()
-    db.refresh(project)
+    
+    # Load created project for response
+    project = db.query(DBProject).filter(DBProject.project_id == new_project_id).first()
     
     return ProjectResponse(
         project_id=str(project.project_id),
@@ -494,8 +545,15 @@ async def update_project(
     lambda result, project_id, api_key, db, current_user, OLD:
         result is not None and
         result.deleted == True and
-        result.project_id == project_id,
-    "Postconditions: Project deleted successfully"
+        result.project_id == project_id and
+        # Cascade verification: All files belonging to project are deleted
+        all(
+            db.query(DBFile).filter(DBFile.file_id == fid).first() is None
+            for fid in OLD.get_value(lambda: [
+                str(f.file_id) for f in db.query(DBFile).filter(DBFile.project_id == project_id).all()
+            ])
+        ),
+    "Postconditions: Project deleted successfully, all files cascaded"
 )
 @router.delete("/{project_id}", response_model=ProjectDeleteResponse)
 async def delete_project(
@@ -505,8 +563,11 @@ async def delete_project(
     current_user = Depends(get_current_user)
 ):
     """
-    Delete a project and all associated files and unit links atomically (cascade).
+    Delete a project and all associated files atomically (cascade).
     Automatically migrates anonymous projects to authenticated user before deletion.
+    
+    Refactored to use Functional Core / Imperative Shell architecture.
+    Cascade deletion is handled in Core.
     """
     user_id, api_key_hash_value = get_project_owner_id(current_user, api_key, db)
     
@@ -514,29 +575,38 @@ async def delete_project(
     if current_user and api_key_hash_value:
         migrate_anonymous_projects_to_user(current_user, api_key_hash_value, db)
     
-    # Load project with ownership check
-    query = db.query(DBProject).filter(DBProject.project_id == project_id)
+    # Determine owner identifier
     if user_id:
-        from sqlalchemy import or_
-        query = query.filter(
-            or_(
-                DBProject.user_id == user_id,
-                DBProject.api_key_hash == api_key_hash_value
-            )
-        )
+        owner_id = user_id
+    elif api_key_hash_value:
+        owner_id = api_key_hash_value
     else:
-        query = query.filter(DBProject.api_key_hash == api_key_hash_value)
+        raise HTTPException(status_code=403, detail="Authentication required")
     
-    project = query.first()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # 1. I/O: Load project + all its files for cascade deletion
+    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
+    state = adapters.build_scoped_state(
+        project_id=project_id,
+        owner_filter=owner_filter,
+        db=db
+    )
     
     # Count files before deletion (for response)
-    file_count = db.query(DBFile).filter(DBFile.project_id == project_id).count()
+    file_count = len([f for f in state.files.values() if f.project_id == project_id])
     
-    # Delete project (cascade deletes files and unit_links automatically)
-    db.delete(project)
+    # 2. CORE: Call pure logic (cascade handled in Core)
+    new_state, result = project_management.delete_project_core(
+        state,
+        project_id,
+        owner_id
+    )
+    
+    # 3. ADAPTER: Apply diff and map errors
+    if not result.success:
+        status_code = map_error_to_status(result.error_kind or "Precondition")
+        raise HTTPException(status_code=status_code, detail=result.error_message)
+    
+    adapters.apply_state_diff(db, state, new_state)
     db.commit()
     
     return ProjectDeleteResponse(

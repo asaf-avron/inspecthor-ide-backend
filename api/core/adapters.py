@@ -6,8 +6,9 @@ This is the most difficult part of the Shell (Oracle identified as highest risk)
 Must reliably translate SQLAlchemy ORM objects (Mutable) into Python Core Models (Immutable/Frozen).
 """
 
-from typing import List, Dict
+from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
+import uuid as uuid_module
 
 from api.database import Project as DBProject, File as DBFile
 from api.core.models import SystemState, Project, File, Owner, FileType
@@ -87,7 +88,66 @@ def build_system_state(
     # Validate state invariants
     state.validate()
     
+    # Scope Contract: Ensure every file has a corresponding project
+    for file_id, file_obj in files_map.items():
+        if file_obj.project_id not in projects_map:
+            raise ValueError(
+                f"Scope Contract violation: File {file_id} references project {file_obj.project_id} "
+                f"that is not in the projects list"
+            )
+    
     return state
+
+
+def build_scoped_state(
+    project_id: Optional[str] = None,
+    owner_filter: Optional[any] = None,
+    db: Optional[Session] = None
+) -> SystemState:
+    """
+    Build scoped SystemState for a specific operation (Oracle's Scope Contract).
+    
+    When loading state for a specific operation (e.g., save_file(project_id=P)),
+    ensures Project P and ALL its files are loaded. This prevents uniqueness check
+    failures when only a partial state is loaded.
+    
+    Args:
+        project_id: Specific project ID to load (if None, loads all)
+        owner_filter: SQLAlchemy filter for ownership (if None, loads all)
+        db: Database session
+    
+    Returns:
+        SystemState snapshot containing the working set
+    
+    Raises:
+        ValueError: If scope contract is violated
+    """
+    if db is None:
+        raise ValueError("Database session required for build_scoped_state")
+    
+    # Load projects
+    query_projects = db.query(DBProject)
+    if project_id:
+        # Convert string to UUID if needed
+        try:
+            project_uuid = uuid_module.UUID(project_id) if isinstance(project_id, str) else project_id
+            query_projects = query_projects.filter(DBProject.project_id == project_uuid)
+        except ValueError:
+            # Invalid UUID format
+            return SystemState(projects={}, files={})
+    if owner_filter is not None:
+        query_projects = query_projects.filter(owner_filter)
+    projects = query_projects.all()
+    
+    if not projects:
+        # Return empty state if no projects found
+        return SystemState(projects={}, files={})
+    
+    # Load ALL files for the projects in scope
+    project_uuids = [p.project_id for p in projects]  # Keep as UUID objects for DB query
+    files = db.query(DBFile).filter(DBFile.project_id.in_(project_uuids)).all()
+    
+    return build_system_state(projects, files)
 
 
 def apply_state_diff(
@@ -96,12 +156,15 @@ def apply_state_diff(
     new_state: SystemState
 ) -> None:
     """
-    Apply state diff to database (update SQLAlchemy objects).
+    Generic Diff Engine (Oracle's pattern).
     
-    This function compares old_state and new_state and applies changes to the database.
-    It handles:
-    - Project updates (owner changes, name/description changes)
-    - File updates (content changes, new files, deleted files)
+    Applies state diff to database with strict ordering to avoid FK constraint violations.
+    Order of operations is critical:
+    1. DELETE Files (children first)
+    2. DELETE Projects (parents second)
+    3. CREATE Projects (parents first)
+    4. CREATE Files (children second)
+    5. UPDATE (any order)
     
     Args:
         db: SQLAlchemy database session
@@ -112,28 +175,74 @@ def apply_state_diff(
         This function performs I/O operations (database writes).
         It should only be called from the Imperative Shell.
     """
-    # Find projects that changed
-    for project_id, new_project in new_state.projects.items():
-        old_project = old_state.projects.get(project_id)
-        
-        if old_project is None:
-            # New project - should not happen in migration, but handle it
-            continue
-        
-        # Check if owner changed (this is the migration case)
-        if old_project.owner != new_project.owner:
-            db_project = db.query(DBProject).filter(
-                DBProject.project_id == project_id
-            ).first()
-            
-            if db_project:
-                # Update owner
-                if new_project.owner.is_authenticated():
-                    db_project.user_id = new_project.owner.user_id
-                    # Keep api_key_hash for backward compatibility
-                elif new_project.owner.is_anonymous():
-                    db_project.api_key_hash = new_project.owner.api_key_hash
-                    db_project.user_id = None
+    # --- 1. DELETIONS (Children First) ---
+    # Files first
+    deleted_files = set(old_state.files.keys()) - set(new_state.files.keys())
+    for file_id in deleted_files:
+        file_uuid = uuid_module.UUID(file_id) if isinstance(file_id, str) else file_id
+        db.query(DBFile).filter(DBFile.file_id == file_uuid).delete()
     
-    # Note: File changes are handled separately in file operations
-    # This adapter focuses on project migration (owner changes)
+    # Projects second (parents)
+    deleted_projects = set(old_state.projects.keys()) - set(new_state.projects.keys())
+    for project_id in deleted_projects:
+        project_uuid = uuid_module.UUID(project_id) if isinstance(project_id, str) else project_id
+        db.query(DBProject).filter(DBProject.project_id == project_uuid).delete()
+    
+    # --- 2. CREATES & UPDATES ---
+    # Projects first (parents)
+    for project_id, new_proj in new_state.projects.items():
+        old_proj = old_state.projects.get(project_id)
+        
+        if old_proj is None:
+            # CREATE: New project
+            project_uuid = uuid_module.UUID(project_id) if isinstance(project_id, str) else project_id
+            db_proj = DBProject(
+                project_id=project_uuid,
+                name=new_proj.name,
+                description=new_proj.description or None,
+                user_id=uuid_module.UUID(new_proj.owner.user_id) if new_proj.owner.is_authenticated() else None,
+                api_key_hash=new_proj.owner.api_key_hash if new_proj.owner.is_anonymous() else None
+            )
+            db.add(db_proj)
+        elif new_proj != old_proj:
+            # UPDATE: Project changed
+            project_uuid = uuid_module.UUID(project_id) if isinstance(project_id, str) else project_id
+            db_proj = db.query(DBProject).filter(DBProject.project_id == project_uuid).first()
+            if db_proj:
+                # Update fields
+                db_proj.name = new_proj.name
+                db_proj.description = new_proj.description or None
+                
+                # Handle owner changes
+                if new_proj.owner.is_authenticated():
+                    db_proj.user_id = uuid_module.UUID(new_proj.owner.user_id)
+                    # Keep api_key_hash for backward compatibility
+                elif new_proj.owner.is_anonymous():
+                    db_proj.api_key_hash = new_proj.owner.api_key_hash
+                    db_proj.user_id = None
+    
+    # Files second (children)
+    for file_id, new_file in new_state.files.items():
+        old_file = old_state.files.get(file_id)
+        file_uuid = uuid_module.UUID(file_id) if isinstance(file_id, str) else file_id
+        project_uuid = uuid_module.UUID(new_file.project_id) if isinstance(new_file.project_id, str) else new_file.project_id
+        
+        if old_file is None:
+            # CREATE: New file
+            db_file = DBFile(
+                file_id=file_uuid,
+                project_id=project_uuid,
+                filename=new_file.filename,
+                content=new_file.content,
+                file_type=new_file.file_type.value,
+                renamed=new_file.renamed
+            )
+            db.add(db_file)
+        elif new_file != old_file:
+            # UPDATE: File changed
+            db_file = db.query(DBFile).filter(DBFile.file_id == file_uuid).first()
+            if db_file:
+                db_file.content = new_file.content
+                db_file.filename = new_file.filename
+                db_file.file_type = new_file.file_type.value
+                db_file.renamed = new_file.renamed

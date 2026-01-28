@@ -25,6 +25,25 @@ from api.auth import get_current_user
 router = APIRouter(prefix="/api/files", tags=["files"])
 
 
+def map_error_to_status(error_kind: str) -> int:
+    """
+    Map Core error kind to HTTP status code (Oracle's mapping table).
+    
+    Mapping:
+    - NotFound → 404
+    - Unauthorized → 403
+    - Conflict → 409
+    - Precondition → 400
+    """
+    mapping = {
+        "NotFound": 404,
+        "Unauthorized": 403,
+        "Conflict": 409,
+        "Precondition": 400
+    }
+    return mapping.get(error_kind, 500)
+
+
 def get_api_key_from_header(
     x_api_key: Optional[str] = Header(None),
     request: Request = None
@@ -73,8 +92,9 @@ def get_project_owner_filter(user: Optional[User] = None, api_key_hash_value: Op
         request.filename is not None and
         len(request.filename) > 0 and
         request.content is not None and
+        len(request.content.encode('utf-8')) < 1000000 and  # Content size < 1MB (matching Dafny)
         db is not None,
-    "Preconditions: Valid request, non-empty filename, db session exists"
+    "Preconditions: Valid request, non-empty filename, content size < 1MB, db session exists"
 )
 @icontract.ensure(
     lambda result, request, api_key, db, current_user, OLD:
@@ -93,46 +113,64 @@ async def save_file(
     """
     Save a specification or Dafny file.
     Files must belong to a project owned by the authenticated user or API key.
+    
+    Refactored to use Functional Core / Imperative Shell architecture.
     """
     api_key_hash_value = hash_api_key(api_key) if api_key else None
     
-    # Validate project exists and is owned by user or API key
+    # Determine owner identifier
+    if current_user:
+        owner_id = str(current_user.user_id)
+    elif api_key_hash_value:
+        owner_id = api_key_hash_value
+    else:
+        raise HTTPException(status_code=403, detail="Authentication required")
+    
+    # 1. I/O: Load scoped state (project + all its files for uniqueness check)
     owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
-    project = db.query(DBProject).filter(
-        DBProject.project_id == request.project_id,
-        owner_filter
-    ).first()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found or unauthorized")
-    
-    # Check filename uniqueness per project
-    existing_file = db.query(DBFile).filter(
-        DBFile.project_id == request.project_id,
-        DBFile.filename == request.filename
-    ).first()
-    
-    if existing_file:
-        raise HTTPException(status_code=409, detail="Filename already exists in this project")
-    
-    size_bytes = len(request.content.encode('utf-8'))
-    
-    db_file = DBFile(
+    state = adapters.build_scoped_state(
         project_id=request.project_id,
-        filename=request.filename,
-        content=request.content,
-        file_type=request.file_type
+        owner_filter=owner_filter,
+        db=db
     )
     
-    db.add(db_file)
+    # 2. CORE: Generate UUID and call pure logic
+    new_file_id = str(uuid.uuid4())
+    
+    # Convert file_type string to FileType enum
+    file_type_map = {
+        'md': FileType.MD,
+        'dfy': FileType.DFY,
+        'unit': FileType.UNIT
+    }
+    file_type = file_type_map.get(request.file_type, FileType.MD)
+    
+    new_state, result = file_operations.save_file_core(
+        state,
+        new_file_id,
+        request.project_id,
+        request.filename,
+        request.content,
+        file_type,
+        owner_id
+    )
+    
+    # 3. ADAPTER: Apply diff and map errors
+    if not result.success:
+        status_code = map_error_to_status(result.error_kind or "Precondition")
+        raise HTTPException(status_code=status_code, detail=result.error_message)
+    
+    adapters.apply_state_diff(db, state, new_state)
     db.commit()
-    db.refresh(db_file)
+    
+    # Load created file for response
+    db_file = db.query(DBFile).filter(DBFile.file_id == new_file_id).first()
     
     return FileSaveResponse(
         file_id=str(db_file.file_id),
         filename=db_file.filename,
         saved_at=db_file.created_at.isoformat(),
-        size_bytes=size_bytes
+        size_bytes=len(request.content.encode('utf-8'))
     )
 
 
@@ -243,37 +281,47 @@ async def update_file(
     Update file content atomically.
     Optionally rename file if filename is provided.
     Only updates files from projects owned by the authenticated user or API key.
+    
+    Refactored to use Functional Core / Imperative Shell architecture.
     """
     api_key_hash_value = hash_api_key(api_key) if api_key else None
     
-    # Join with project to verify ownership
-    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
-    db_file = db.query(DBFile).join(DBProject).filter(
-        DBFile.file_id == file_id,
-        owner_filter
-    ).first()
+    # Determine owner identifier
+    if current_user:
+        owner_id = str(current_user.user_id)
+    elif api_key_hash_value:
+        owner_id = api_key_hash_value
+    else:
+        raise HTTPException(status_code=403, detail="Authentication required")
     
+    # 1. I/O: Load file to get project_id, then load scoped state
+    db_file = db.query(DBFile).filter(DBFile.file_id == file_id).first()
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    # Update content
-    db_file.content = request.content
+    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
+    state = adapters.build_scoped_state(
+        project_id=str(db_file.project_id),
+        owner_filter=owner_filter,
+        db=db
+    )
     
-    # Update filename if provided (with uniqueness check)
-    if request.filename and request.filename != db_file.filename:
-        existing = db.query(DBFile).filter(
-            DBFile.project_id == db_file.project_id,
-            DBFile.filename == request.filename,
-            DBFile.file_id != file_id
-        ).first()
-        
-        if existing:
-            raise HTTPException(status_code=409, detail="Filename already exists in this project")
-        
-        db_file.filename = request.filename
-        db_file.renamed = True  # Mark file as manually renamed
+    # 2. CORE: Call pure logic
+    new_filename = request.filename if request.filename else ""
+    new_state, result = file_operations.update_file_core(
+        state,
+        file_id,
+        request.content,
+        new_filename,
+        owner_id
+    )
     
-    # updated_at is auto-updated by SQLAlchemy
+    # 3. ADAPTER: Apply diff and map errors
+    if not result.success:
+        status_code = map_error_to_status(result.error_kind or "Precondition")
+        raise HTTPException(status_code=status_code, detail=result.error_message)
+    
+    adapters.apply_state_diff(db, state, new_state)
     db.commit()
     db.refresh(db_file)
     
@@ -314,20 +362,44 @@ async def delete_file(
     """
     Delete a file by ID.
     Only deletes files from projects owned by the authenticated user or API key.
+    
+    Refactored to use Functional Core / Imperative Shell architecture.
     """
     api_key_hash_value = hash_api_key(api_key) if api_key else None
     
-    # Join with project to verify ownership
-    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
-    db_file = db.query(DBFile).join(DBProject).filter(
-        DBFile.file_id == file_id,
-        owner_filter
-    ).first()
+    # Determine owner identifier
+    if current_user:
+        owner_id = str(current_user.user_id)
+    elif api_key_hash_value:
+        owner_id = api_key_hash_value
+    else:
+        raise HTTPException(status_code=403, detail="Authentication required")
     
+    # 1. I/O: Load file to get project_id, then load scoped state
+    db_file = db.query(DBFile).filter(DBFile.file_id == file_id).first()
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    db.delete(db_file)
+    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
+    state = adapters.build_scoped_state(
+        project_id=str(db_file.project_id),
+        owner_filter=owner_filter,
+        db=db
+    )
+    
+    # 2. CORE: Call pure logic
+    new_state, result = file_operations.delete_file_core(
+        state,
+        file_id,
+        owner_id
+    )
+    
+    # 3. ADAPTER: Apply diff and map errors
+    if not result.success:
+        status_code = map_error_to_status(result.error_kind or "Precondition")
+        raise HTTPException(status_code=status_code, detail=result.error_message)
+    
+    adapters.apply_state_diff(db, state, new_state)
     db.commit()
     
     return {"deleted": True, "file_id": file_id}
