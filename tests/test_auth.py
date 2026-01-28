@@ -6,6 +6,7 @@ Smoke tests to ensure endpoints are routed correctly and handle requests.
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock, AsyncMock
+from datetime import datetime, timedelta
 
 
 def test_auth_github_endpoint_existence(client, monkeypatch):
@@ -143,3 +144,63 @@ def test_auth_github_callback_with_code(client, monkeypatch):
         
         # Should redirect to frontend with success or return JSON
         assert response.status_code in [200, 302, 307]
+
+
+def test_auth_me_with_string_uuid_in_token(client, db_session, monkeypatch):
+    """
+    Test that /api/auth/me handles JWT tokens with string UUIDs correctly.
+    This reproduces the SQLite UUID issue where string UUIDs from JWT payloads
+    need to be converted to UUID objects before database queries.
+    """
+    import uuid
+    from api.database import User
+    
+    # Create a test user with required fields
+    import api.auth
+    dummy_token = api.auth.encrypt_token("dummy_token")
+    test_user = User(
+        github_id=99999,
+        github_login="testuser_uuid",
+        email="testuuid@example.com",
+        avatar_url="https://example.com/avatar.png",
+        access_token_encrypted=dummy_token,
+        tier='free',
+        verification_credits=10
+    )
+    db_session.add(test_user)
+    db_session.commit()
+    db_session.refresh(test_user)
+    
+    # Create a JWT token with string UUID (as JWT tokens contain)
+    user_id_str = str(test_user.user_id)
+    token_data = {
+        "sub": user_id_str,  # String UUID, not UUID object
+        "github_id": test_user.github_id,
+        "github_login": test_user.github_login,
+        "tier": test_user.tier,
+        "type": "access",
+        "exp": datetime.utcnow() + timedelta(minutes=15)
+    }
+    
+    # Patch JWT_SECRET for token creation
+    monkeypatch.setattr(api.auth, "JWT_SECRET", "test-secret-key")
+    
+    # Create token using the auth module's function
+    access_token = api.auth.create_access_token({
+        "sub": user_id_str,
+        "github_id": test_user.github_id,
+        "github_login": test_user.github_login,
+        "tier": test_user.tier,
+    })
+    
+    # Make request with the token cookie
+    response = client.get(
+        "/api/auth/me",
+        cookies={"access_token": access_token}
+    )
+    
+    # Should succeed and return user info (after fix)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user_id"] == user_id_str
+    assert data["github_login"] == "testuser_uuid"

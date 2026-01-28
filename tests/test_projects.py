@@ -214,3 +214,26 @@ def test_list_projects_sorting(client, headers, db_session, api_key_hash):
     assert projects[0]["name"] == "Alpha"
     assert projects[1]["name"] == "Beta"
     assert projects[2]["name"] == "Gamma"
+
+
+def test_get_project_with_string_uuid(client, headers, db_session, api_key_hash):
+    """
+    Test that GET /api/projects/{project_id} handles string UUIDs correctly.
+    This reproduces the SQLite UUID issue where path parameters come as strings
+    but need to be converted to UUID objects for database queries.
+    """
+    # Create project
+    project = Project(name="Test Project", api_key_hash=api_key_hash)
+    db_session.add(project)
+    db_session.commit()
+    
+    project_id_str = str(project.project_id)  # String UUID (as it comes from path parameter)
+    
+    # GET project using string UUID
+    response = client.get(f"/api/projects/{project_id_str}", headers=headers)
+    
+    # Should succeed and return project info (after fix)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "Test Project"
+    assert data["project_id"] == project_id_str
