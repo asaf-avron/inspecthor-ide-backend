@@ -30,6 +30,7 @@ jobs:
           context: .
           file: ./Dockerfile.api
           load: true
+          push: false
           tags: guardian-gateway-api:latest
           cache-from: |
             type=gha,scope=global
