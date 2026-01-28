@@ -166,6 +166,7 @@ class File(Base):
         Enum('md', 'dfy', 'unit', name='file_type_enum'),
         nullable=False
     )
+    renamed = Column(Boolean, nullable=False, default=False)  # Track if file was manually renamed
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime,
