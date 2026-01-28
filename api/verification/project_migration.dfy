@@ -58,14 +58,14 @@ module ProjectMigration {
     var userId := "user456";
     
     var state1 := SystemState(
-      projects := map pid := project1Id :: Project(
+      projects := map[project1Id := Project(
         projectId := project1Id,
         name := "TestProject",
         description := "Test",
         owner := Anonymous(sessionHash),
         fileIds := {file1Id}
-      ),
-      files := map fid := file1Id :: File(
+      )],
+      files := map[file1Id := File(
         fileId := file1Id,
         projectId := project1Id,
         filename := "test.md",
@@ -73,7 +73,7 @@ module ProjectMigration {
         fileType := MD,
         sizeBytes := 7,
         renamed := false
-      )
+      )]
     );
     
     var expectedState1 := MigrateAnonymousProjects(state1, userId, sessionHash);

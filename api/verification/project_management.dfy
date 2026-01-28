@@ -26,8 +26,9 @@ module ProjectManagement {
     requires |name| > 0 && |name| <= 255
     requires |description| <= 1000
     requires ProjectNameUnique(s, name, owner)
-    ensures ValidState(result.0)
-    ensures result.1.Success? ==> newProjectId in result.0.projects
+    ensures ValidState(CreateProject(s, newProjectId, name, description, owner).0)
+    ensures var res := CreateProject(s, newProjectId, name, description, owner);
+             res.1.Success? ==> newProjectId in res.0.projects
   {
     if !ProjectNameUnique(s, name, owner) then (s, Failure("Name taken"))
     else
@@ -46,12 +47,14 @@ module ProjectManagement {
     // Owner check (Auth or Anon)
     requires var p := s.projects[projectId]; 
              p.owner == Authenticated(ownerId) || p.owner == Anonymous(ownerId)
-    ensures ValidState(result.0)
+    ensures ValidState(DeleteProject(s, projectId, ownerId).0)
     // Post: Project gone
-    ensures result.1.Success? ==> projectId !in result.0.projects
+    ensures var res := DeleteProject(s, projectId, ownerId);
+             res.1.Success? ==> projectId !in res.0.projects
     // Post: Cascade - all files belonging to project are gone
-    ensures result.1.Success? ==> 
-      forall fid :: fid in s.files && s.files[fid].projectId == projectId ==> fid !in result.0.files
+    ensures var res := DeleteProject(s, projectId, ownerId);
+             res.1.Success? ==> 
+      forall fid :: fid in s.files && s.files[fid].projectId == projectId ==> fid !in res.0.files
   {
     var proj := s.projects[projectId];
     
