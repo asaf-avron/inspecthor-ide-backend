@@ -17,8 +17,8 @@ try:
     from google import genai
     from google.genai import types
 except ImportError:
-    genai = None
-    types = None
+    genai = None  # type: ignore[assignment]
+    types = None  # type: ignore[assignment]
 
 from dotenv import load_dotenv
 
@@ -177,6 +177,7 @@ class WorkflowManager:
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
         self._flash_model = self.FLASH_MODEL
         self._pro_model = self.PRO_MODEL
+        self._init_error: Optional[str] = None
         
         if genai is None:
             self._init_error = "google-genai package not installed. Run: pip install google-genai"
@@ -238,7 +239,7 @@ def run_triage(text: str, api_key: Optional[str] = None) -> TriageResult:
             model=manager._flash_model,
             contents=prompt
         )
-        raw_text = response.text
+        raw_text = response.text or ""
         
         # Parse JSON response
         cleaned = raw_text.strip()
@@ -310,7 +311,7 @@ def run_structuring(text: str, api_key: Optional[str] = None) -> StructureResult
             model=manager._pro_model,
             contents=prompt
         )
-        structured_spec = response.text.strip()
+        structured_spec = (response.text or "").strip()
         
         # Validate structure - check for required sections
         validation_passed = _validate_structure(structured_spec)

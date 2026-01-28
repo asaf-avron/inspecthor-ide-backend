@@ -8,14 +8,14 @@ from sqlalchemy import (
     ForeignKey, Enum, func, Boolean
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import DeclarativeBase, sessionmaker, relationship
 from datetime import datetime
 import os
 import hashlib
 import uuid
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 
 class User(Base):
@@ -41,7 +41,7 @@ class User(Base):
     token_expires_at = Column(DateTime, nullable=True)
     
     # User tier and rate limiting
-    tier = Column(
+    tier: Column[str] = Column(
         Enum('free', 'pro', 'team', name='user_tier_enum'),
         nullable=False,
         default='free'
@@ -162,7 +162,7 @@ class File(Base):
     )
     filename = Column(String(255), nullable=False)
     content = Column(Text, nullable=False)
-    file_type = Column(
+    file_type: Column[str] = Column(
         Enum('md', 'dfy', 'unit', name='file_type_enum'),
         nullable=False
     )
@@ -234,7 +234,7 @@ class UnitLink(Base):
     start_line = Column(Integer, nullable=False)
     end_line = Column(Integer, nullable=False)
     title = Column(String(255), nullable=True)
-    verification_status = Column(
+    verification_status: Column[str] = Column(
         Enum('unknown', 'verified', 'failed', 'pending', name='verification_status_enum'),
         nullable=False,
         default='unknown'
@@ -332,7 +332,7 @@ class Repository(Base):
     
     # Sync status
     last_synced_at = Column(DateTime, nullable=True)
-    sync_status = Column(
+    sync_status: Column[str] = Column(
         Enum('never', 'syncing', 'synced', 'error', name='sync_status_enum'),
         nullable=False,
         default='never'
@@ -406,7 +406,7 @@ class Anchor(Base):
     
     # Verification status
     last_verified_at = Column(DateTime, nullable=True)
-    verification_status = Column(
+    verification_status: Column[str] = Column(
         Enum('unknown', 'verified', 'failed', 'pending', name='anchor_status_enum'),
         nullable=False,
         default='unknown'
@@ -414,7 +414,7 @@ class Anchor(Base):
     proof_receipt_hash = Column(String(64), nullable=True)
     
     # Metadata
-    language = Column(
+    language: Column[str] = Column(
         Enum('python', 'typescript', 'javascript', name='anchor_language_enum'),
         nullable=False
     )
@@ -472,7 +472,7 @@ class ProofReceipt(Base):
     contract_hash = Column(String(64), nullable=False)  # SHA-256 of Dafny contract
     
     # Verification result
-    status = Column(
+    status: Column[str] = Column(
         Enum('verified', 'failed', name='receipt_status_enum'),
         nullable=False
     )
@@ -480,7 +480,7 @@ class ProofReceipt(Base):
     counterexample = Column(Text, nullable=True)  # JSON if failed
     
     # Provenance
-    verified_by = Column(
+    verified_by: Column[str] = Column(
         Enum('ide', 'webhook', 'manual', name='verified_by_enum'),
         nullable=False
     )

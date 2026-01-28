@@ -1,0 +1,15 @@
+repos:
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.0
+    hooks:
+    -   id: ruff
+        args: [ --fix, --exit-non-zero-on-fix ]
+        exclude: ^(api/alembic|scripts|tests)/
+
+-   repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.0.0
+    hooks:
+    -   id: mypy
+        additional_dependencies: [types-requests, types-PyYAML, sqlalchemy>=2.0.0]
+        args: [--ignore-missing-imports, --check-untyped-defs]
+        exclude: ^(api/alembic|scripts|tests)/

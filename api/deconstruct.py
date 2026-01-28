@@ -102,11 +102,13 @@ Return JSON array of units:"""
 
         try:
             # Call Gemini API
+            if not self.auditor._model:
+                raise ValueError("Model not configured")
             response = self.auditor._client.models.generate_content(
                 model=self.auditor._model,
                 contents=prompt
             )
-            raw_text = response.text
+            raw_text = response.text or ""
             
             # Clean up response
             cleaned = raw_text.strip()
@@ -274,7 +276,7 @@ async def deconstruct_specification(
     
     # Identify units
     try:
-        unit_candidates = identifier.identify_units(source_file.content)
+        unit_candidates = identifier.identify_units(str(source_file.content))  # type: ignore[arg-type]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
@@ -293,7 +295,7 @@ async def deconstruct_specification(
         try:
             # Extract content for this unit
             unit_content = extract_content_by_lines(
-                source_file.content,
+                str(source_file.content),  # type: ignore[arg-type]
                 candidate.line_range[0],
                 candidate.line_range[1]
             )
@@ -455,12 +457,12 @@ async def get_file_traceability(
         links.append(TraceabilityLink(
             unit_id=str(link.unit_file_id),
             dafny_file_id=str(link.dafny_file_id),
-            title=link.title or "Untitled Unit",
+            title=str(link.title) if link.title else "Untitled Unit",  # type: ignore[arg-type]
             source_range={
                 "start_line": link.start_line,
                 "end_line": link.end_line
             },
-            status=link.verification_status or "unknown"
+            status=str(link.verification_status) if link.verification_status else "unknown"  # type: ignore[arg-type]
         ))
     
     return TraceabilityResponse(

@@ -6,7 +6,6 @@ Uses Dafny /mv flag to generate model values from concrete instances.
 import subprocess
 import json
 import logging
-from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)

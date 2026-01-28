@@ -193,7 +193,7 @@ class Result:
     error_message: Optional[str] = None
     
     @classmethod
-    def success(cls, value: Any) -> "Result":
+    def ok(cls, value: Any) -> "Result":
         """Create successful result."""
         return cls(success=True, value=value)
     

@@ -96,7 +96,7 @@ def create_project_core(
     new_state = SystemState(projects=new_projects, files=state.files)
     new_state.validate()
     
-    return (new_state, Result.success(new_project_id))
+    return (new_state, Result.ok(new_project_id))
 
 
 @icontract.require(
@@ -166,4 +166,4 @@ def delete_project_core(
     new_state = SystemState(projects=new_projects, files=new_files)
     new_state.validate()
     
-    return (new_state, Result.success(True))
+    return (new_state, Result.ok(True))

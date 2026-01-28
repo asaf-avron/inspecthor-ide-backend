@@ -5,7 +5,6 @@ Synthesis script for generating Python Core functions from Dafny specifications.
 This script uses the manual migration.py as a "few-shot" example to guide synthesis.
 """
 
-import os
 import sys
 from pathlib import Path
 from typing import Optional

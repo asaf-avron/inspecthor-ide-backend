@@ -6,7 +6,7 @@ This is the most difficult part of the Shell (Oracle identified as highest risk)
 Must reliably translate SQLAlchemy ORM objects (Mutable) into Python Core Models (Immutable/Frozen).
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session
 import uuid as uuid_module
 
@@ -43,16 +43,16 @@ def build_system_state(
             'dfy': FileType.DFY,
             'unit': FileType.UNIT
         }
-        file_type = file_type_map.get(db_file.file_type, FileType.MD)
+        file_type = file_type_map.get(str(db_file.file_type), FileType.MD)  # type: ignore[arg-type]
         
         file_obj = File(
             file_id=str(db_file.file_id),
             project_id=str(db_file.project_id),
-            filename=db_file.filename,
-            content=db_file.content,
+            filename=str(db_file.filename),  # type: ignore[arg-type]
+            content=str(db_file.content),  # type: ignore[arg-type]
             file_type=file_type,
             size_bytes=len(db_file.content.encode('utf-8')),
-            renamed=db_file.renamed
+            renamed=bool(db_file.renamed)  # type: ignore[arg-type]
         )
         files_map[str(db_file.file_id)] = file_obj
     
@@ -63,7 +63,7 @@ def build_system_state(
         if db_project.user_id:
             owner = Owner.authenticated(str(db_project.user_id))
         elif db_project.api_key_hash:
-            owner = Owner.anonymous(db_project.api_key_hash)
+            owner = Owner.anonymous(str(db_project.api_key_hash))  # type: ignore[arg-type]
         else:
             # Should not happen, but handle gracefully
             owner = Owner.anonymous("")
@@ -76,8 +76,8 @@ def build_system_state(
         
         project_obj = Project(
             project_id=str(db_project.project_id),
-            name=db_project.name,
-            description=db_project.description or "",
+            name=str(db_project.name),  # type: ignore[arg-type]
+            description=str(db_project.description) if db_project.description else "",  # type: ignore[arg-type]
             owner=owner,
             file_ids=file_ids
         )
@@ -101,7 +101,7 @@ def build_system_state(
 
 def build_scoped_state(
     project_id: Optional[str] = None,
-    owner_filter: Optional[any] = None,
+    owner_filter: Optional[Any] = None,
     db: Optional[Session] = None
 ) -> SystemState:
     """
@@ -207,19 +207,19 @@ def apply_state_diff(
         elif new_proj != old_proj:
             # UPDATE: Project changed
             project_uuid = uuid_module.UUID(project_id) if isinstance(project_id, str) else project_id
-            db_proj = db.query(DBProject).filter(DBProject.project_id == project_uuid).first()
+            db_proj = db.query(DBProject).filter(DBProject.project_id == project_uuid).first()  # type: ignore[assignment]
             if db_proj:
                 # Update fields
-                db_proj.name = new_proj.name
-                db_proj.description = new_proj.description or None
+                db_proj.name = new_proj.name  # type: ignore[assignment]
+                db_proj.description = new_proj.description or None  # type: ignore[assignment]
                 
                 # Handle owner changes
                 if new_proj.owner.is_authenticated():
-                    db_proj.user_id = uuid_module.UUID(new_proj.owner.user_id)
+                    db_proj.user_id = uuid_module.UUID(new_proj.owner.user_id)  # type: ignore[assignment]
                     # Keep api_key_hash for backward compatibility
                 elif new_proj.owner.is_anonymous():
-                    db_proj.api_key_hash = new_proj.owner.api_key_hash
-                    db_proj.user_id = None
+                    db_proj.api_key_hash = new_proj.owner.api_key_hash  # type: ignore[assignment]
+                    db_proj.user_id = None  # type: ignore[assignment]
     
     # Files second (children)
     for file_id, new_file in new_state.files.items():
@@ -240,9 +240,9 @@ def apply_state_diff(
             db.add(db_file)
         elif new_file != old_file:
             # UPDATE: File changed
-            db_file = db.query(DBFile).filter(DBFile.file_id == file_uuid).first()
-            if db_file:
-                db_file.content = new_file.content
-                db_file.filename = new_file.filename
-                db_file.file_type = new_file.file_type.value
-                db_file.renamed = new_file.renamed
+            db_file = db.query(DBFile).filter(DBFile.file_id == file_uuid).first()  # type: ignore[assignment]
+            if db_file:  # type: ignore[assignment]
+                db_file.content = new_file.content  # type: ignore[assignment]
+                db_file.filename = new_file.filename  # type: ignore[assignment]
+                db_file.file_type = new_file.file_type.value  # type: ignore[assignment]
+                db_file.renamed = new_file.renamed  # type: ignore[assignment]

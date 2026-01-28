@@ -100,7 +100,7 @@ class CheckRunService:
         if conclusion:
             update_kwargs["conclusion"] = conclusion
         
-        check_run.edit(**update_kwargs)
+        check_run.edit(**update_kwargs)  # type: ignore[arg-type]
         
         return {
             "id": check_run.id,

@@ -215,7 +215,7 @@ if __name__ == "__main__":
         contract = parser.parse(source_code)
         
         # Visual Report
-        print(f"✅ Found Contract!")
+        print("✅ Found Contract!")
         for method in contract.methods:
             print(f"\n🔹 Method: {method.name}")
             print(f"   🛡️ Guardrails ({len(method.preconditions)}):")
