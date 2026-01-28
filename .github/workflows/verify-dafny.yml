@@ -31,8 +31,8 @@ jobs:
           file: ./Dockerfile.api
           load: true
           tags: guardian-gateway-api:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=global
+          cache-to: type=gha,mode=max,scope=global
       
       - name: Verify Dafny specifications
         run: |
