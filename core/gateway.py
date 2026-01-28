@@ -19,8 +19,8 @@ try:
     from google import genai
     from google.genai import types
 except ImportError:
-    genai = None
-    types = None
+    genai = None  # type: ignore[assignment]
+    types = None  # type: ignore[assignment]
 
 from dotenv import load_dotenv
 
@@ -93,7 +93,7 @@ class PromptLoader:
     DEFAULT_EXAMPLES_DIR = "assets/examples"
     
     @staticmethod
-    def load_examples(dir_path: str = None) -> str:
+    def load_examples(dir_path: Optional[str] = None) -> str:
         """
         Load all JSON examples from the directory and format for LLM prompt.
         
@@ -182,6 +182,7 @@ class CodeVerifier:
         """
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
         self._model = self.DEFAULT_MODEL
+        self._init_error: Optional[str] = None
         
         if genai is None:
             self._init_error = "google-genai package not installed. Run: pip install google-genai"
@@ -319,7 +320,7 @@ OUTPUT RULES:
                 model=self._model,
                 contents=prompt
             )
-            raw_text = response.text
+            raw_text = response.text or ""
             
             # Clean up the response - remove markdown code blocks if present
             cleaned = raw_text.strip()

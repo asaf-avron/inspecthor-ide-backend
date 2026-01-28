@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from github import GithubIntegration, Auth
 from pydantic import BaseModel
 
-from ..database import Installation, Repository, User
+from ..database import Installation, Repository
 
 
 class InstallationData(BaseModel):
@@ -72,13 +72,13 @@ class GitHubAppManager:
         
         if existing:
             # Update existing installation
-            existing.user_id = user_id
-            existing.account_login = data.account_login
-            existing.account_type = data.account_type
-            existing.account_id = data.account_id
-            existing.is_active = True
-            existing.suspended_at = None
-            existing.updated_at = datetime.utcnow()
+            existing.user_id = user_id  # type: ignore[assignment]
+            existing.account_login = data.account_login  # type: ignore[assignment]
+            existing.account_type = data.account_type  # type: ignore[assignment]
+            existing.account_id = data.account_id  # type: ignore[assignment]
+            existing.is_active = True  # type: ignore[assignment]
+            existing.suspended_at = None  # type: ignore[assignment]
+            existing.updated_at = datetime.utcnow()  # type: ignore[assignment]
             db.commit()
             db.refresh(existing)
             return existing
@@ -120,8 +120,8 @@ class GitHubAppManager:
         ).first()
         
         if installation:
-            installation.is_active = False
-            installation.updated_at = datetime.utcnow()
+            installation.is_active = False  # type: ignore[assignment]
+            installation.updated_at = datetime.utcnow()  # type: ignore[assignment]
             db.commit()
     
     async def handle_installation_repositories_added(
@@ -198,7 +198,7 @@ class GitHubAppManager:
                 existing.name = repo_data["name"]
                 existing.full_name = repo_data["full_name"]
                 existing.default_branch = repo_data.get("default_branch", "main")
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.utcnow()  # type: ignore[assignment]
             else:
                 # Create new repository
                 repository = Repository(

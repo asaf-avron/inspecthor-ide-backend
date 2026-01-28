@@ -4,7 +4,7 @@ Converts Dafny pre/postconditions to Python icontract decorators.
 """
 
 import re
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 
 def dafny_to_icontract_require(dafny_precondition: str) -> str:

@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import os
 import re
-from typing import List, Optional
+from typing import List, Optional, Literal, cast
 import time
 
 from api.models import (
@@ -16,7 +16,6 @@ from api.models import (
     VerifyResponse,
     VerificationResult,
     VerificationError,
-    ProofObligationDetail,
     GapLocation
 )
 
@@ -48,11 +47,21 @@ def parse_dafny_output(output: str, return_code: int) -> tuple[bool, List[Verifi
         method_name = match.group(2)
         status = "verified" if "verified" in match.group(3).lower() else "failed"
         
+        # Cast to Literal types for VerificationResult
+        result_type: Literal["method", "function", "invariant"] = cast(
+            Literal["method", "function", "invariant"],
+            method_type if method_type in ["method", "function"] else "method"
+        )
+        result_status: Literal["verified", "failed", "timeout"] = cast(
+            Literal["verified", "failed", "timeout"],
+            "verified" if status == "verified" else "failed"
+        )
+        
         results.append(VerificationResult(
-            type=method_type if method_type in ["method", "function"] else "method",
+            type=result_type,
             name=method_name,
             location=GapLocation(line=None, column=None, file=None),
-            status=status,
+            status=result_status,
             message=f"{method_type.capitalize()} {method_name} {status}",
             proof_obligations=[]
         ))
