@@ -9,24 +9,48 @@ and verify that Python implementations produce the same results.
 import pytest
 import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 # Import Core modules
-from api.core import models, migration
+from api.core import models, migration, file_operations, project_management
 
 
-def load_test_vectors(json_path: str) -> List[Dict[str, Any]]:
+def load_test_vectors_json(json_path: str) -> Dict[str, Any]:
     """
-    Load test vectors from JSON file.
+    Load test vectors JSON file matching Oracle's schema.
+    
+    Expected structure:
+    {
+      "test_suite": "FileOperations",
+      "cases": [
+        {
+          "id": "save_01_success",
+          "input": { "method": "SaveFile", "params": {...} },
+          "expected_output": { "success": true, ... }
+        }
+      ]
+    }
     
     Args:
         json_path: Path to test vectors JSON file
     
     Returns:
-        List of test vector dictionaries
+        Parsed JSON dictionary
     """
     with open(json_path, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+
+def state_from_json(state_dict: Dict[str, Any]) -> models.SystemState:
+    """
+    Convert JSON state dictionary to SystemState object.
+    
+    This is a placeholder - full implementation requires converting
+    nested JSON structures to Core models.
+    """
+    # TODO: Implement full conversion from JSON to SystemState
+    # For now, return empty state
+    return models.SystemState(projects={}, files={})
 
 
 class TestMigrationOracle:
@@ -45,52 +69,96 @@ class TestMigrationOracle:
         """
         Oracle test: Verify migrate_anonymous_projects matches Dafny spec.
         
-        Loads test vectors from Dafny GenerateTests() and verifies Python
-        implementation produces identical results.
+        Loads test vectors from Dafny GenerateTests() JSON output and verifies
+        Python implementation produces identical results.
         """
-        test_vectors = load_test_vectors(str(test_vectors_path))
+        json_data = load_test_vectors_json(str(test_vectors_path))
         
-        for vector in test_vectors:
-            # Extract inputs from test vector
-            # Format: (SystemState, userId, sessionHash, expectedState)
-            old_state_dict = vector[0]
-            user_id = vector[1]
-            session_hash = vector[2]
-            expected_state_dict = vector[3]
+        if json_data.get("test_suite") != "ProjectMigration":
+            pytest.skip(f"Test suite mismatch: expected ProjectMigration, got {json_data.get('test_suite')}")
+        
+        for test_case in json_data.get("cases", []):
+            # Extract inputs from test case
+            params = test_case["input"]["params"]
+            user_id = params["userId"]
+            session_hash = params["currentSessionHash"]
             
-            # Convert dicts to SystemState objects
-            # TODO: Implement conversion from JSON to SystemState
-            # old_state = models.SystemState.from_dict(old_state_dict)
-            # expected_state = models.SystemState.from_dict(expected_state_dict)
-            
-            # Call Python function
-            # new_state = migration.migrate_anonymous_projects(
-            #     old_state, user_id, session_hash
-            # )
-            
-            # Verify result matches expected
-            # assert new_state == expected_state
-            
-            # Placeholder: skip actual test until conversion is implemented
+            # TODO: Convert state_delta from JSON to SystemState
+            # For now, skip until conversion is implemented
             pytest.skip("SystemState JSON conversion not yet implemented")
 
 
 class TestFileOperationsOracle:
     """Oracle tests for file operations."""
     
-    @pytest.mark.skip(reason="File operations not yet synthesized")
-    def test_save_file(self):
-        """Oracle test for SaveFile function."""
-        pytest.skip("File operations synthesis pending")
+    @pytest.fixture
+    def test_vectors_path(self):
+        """Path to file operations test vectors JSON file."""
+        return Path(__file__).parent / "test_vectors_file_operations.json"
+    
+    @pytest.mark.skipif(
+        not (Path(__file__).parent / "test_vectors_file_operations.json").exists(),
+        reason="Test vectors not generated yet"
+    )
+    def test_save_file(self, test_vectors_path):
+        """
+        Oracle test: Verify save_file_core matches Dafny SaveFile spec.
+        
+        Loads test vectors from Dafny GenerateTests() JSON output.
+        """
+        json_data = load_test_vectors_json(str(test_vectors_path))
+        
+        if json_data.get("test_suite") != "FileOperations":
+            pytest.skip(f"Test suite mismatch: expected FileOperations, got {json_data.get('test_suite')}")
+        
+        for test_case in json_data.get("cases", []):
+            # Extract inputs
+            params = test_case["input"]["params"]
+            method = test_case["input"]["method"]
+            expected = test_case["expected_output"]
+            
+            if method == "SaveFile":
+                # TODO: Convert state_delta and params to SystemState and call save_file_core
+                # new_state, result = file_operations.save_file_core(...)
+                # assert result.success == expected["success"]
+                pytest.skip("SystemState JSON conversion not yet implemented")
 
 
 class TestProjectManagementOracle:
     """Oracle tests for project management."""
     
-    @pytest.mark.skip(reason="Project management not yet synthesized")
-    def test_create_project(self):
-        """Oracle test for CreateProject function."""
-        pytest.skip("Project management synthesis pending")
+    @pytest.fixture
+    def test_vectors_path(self):
+        """Path to project management test vectors JSON file."""
+        return Path(__file__).parent / "test_vectors_project_management.json"
+    
+    @pytest.mark.skipif(
+        not (Path(__file__).parent / "test_vectors_project_management.json").exists(),
+        reason="Test vectors not generated yet"
+    )
+    def test_delete_project_cascade(self, test_vectors_path):
+        """
+        Oracle test: Verify delete_project_core matches Dafny DeleteProject spec.
+        
+        Specifically tests cascade deletion of files.
+        """
+        json_data = load_test_vectors_json(str(test_vectors_path))
+        
+        if json_data.get("test_suite") != "ProjectManagement":
+            pytest.skip(f"Test suite mismatch: expected ProjectManagement, got {json_data.get('test_suite')}")
+        
+        for test_case in json_data.get("cases", []):
+            # Extract inputs
+            params = test_case["input"]["params"]
+            method = test_case["input"]["method"]
+            expected = test_case["expected_output"]
+            
+            if method == "DeleteProject":
+                # TODO: Convert state_delta and params to SystemState and call delete_project_core
+                # new_state, result = project_management.delete_project_core(...)
+                # assert result.success == expected["success"]
+                # Verify cascade: check that files_cascaded are removed from new_state
+                pytest.skip("SystemState JSON conversion not yet implemented")
 
 
 def test_state_validation():

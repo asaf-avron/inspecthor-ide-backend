@@ -6,7 +6,7 @@ See: api/verification/models.dfy :: DatabaseModel
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Set, Optional
+from typing import Dict, Set, Optional, Any
 from enum import Enum
 
 
