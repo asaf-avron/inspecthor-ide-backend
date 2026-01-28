@@ -3,8 +3,7 @@ Dafny Contract + Implementation Merger for InSpecThor.
 Combines Dafny contracts (from specs) with implementations (from transpiler).
 """
 
-import re
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 
 
@@ -110,12 +109,17 @@ class DafnyMerger:
         """
         lines = contract.strip().split('\n')
         
-        parts = {
+        parts: Dict[str, Any] = {
             "signature": "",
             "requires": [],
             "ensures": [],
             "decreases": []
         }
+        # Explicitly type the list values to allow .append()
+        from typing import cast
+        parts["requires"] = cast(List[str], parts["requires"])
+        parts["ensures"] = cast(List[str], parts["ensures"])
+        parts["decreases"] = cast(List[str], parts["decreases"])
         
         current_clause = None
         

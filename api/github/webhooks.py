@@ -6,7 +6,6 @@ Processes push, pull_request, and installation events.
 import hmac
 import hashlib
 import os
-import json
 import logging
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Request, HTTPException, Depends, BackgroundTasks
@@ -14,7 +13,7 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-from ..database import get_db, Installation, Repository, Anchor
+from ..database import get_db, Repository, Anchor
 from .app import GitHubAppManager, InstallationData
 from .api_client import GitHubStatelessClient
 from .checks import CheckRunService
@@ -125,7 +124,7 @@ async def handle_webhook(
         webhook_secret = os.getenv('GITHUB_WEBHOOK_SECRET')
         if webhook_secret:
             if not signature:
-                logger.warning(f"Webhook secret configured but no signature header present (X-Hub-Signature-256)")
+                logger.warning("Webhook secret configured but no signature header present (X-Hub-Signature-256)")
                 raise HTTPException(status_code=401, detail="Missing webhook signature header")
             if not verify_webhook_signature(body, signature):
                 logger.warning(f"Webhook signature verification failed for event {event_type}")
@@ -255,7 +254,7 @@ async def handle_push_event(db: Session, payload: Dict[str, Any]):
     ).all()
     
     if not anchors:
-        print(f"[Push] No anchors found in changed files")
+        print("[Push] No anchors found in changed files")
         return
     
     print(f"[Push] Found {len(anchors)} anchors to verify")
@@ -374,7 +373,7 @@ async def handle_pull_request_event(db: Session, payload: Dict[str, Any]):
             conclusion="success",
             output={
                 "title": f"✓ {len(anchors)} anchor(s) verified",
-                "summary": f"All anchored functions passed formal verification.\n\n**Anchors:**\n" + 
+                "summary": "All anchored functions passed formal verification.\n\n**Anchors:**\n" + 
                           "\n".join([f"- `{a.function_name}` in `{a.file_path}`" for a in anchors])
             }
         )

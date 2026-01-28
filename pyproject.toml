@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 88
+# Exclude non-production code
+exclude = [
+    "api/alembic",
+    "scripts",
+    "tests",
+]
+
+[tool.ruff.lint]
+select = ["E", "F"]
+# E501: Line length
+# E402: Module level import
+# E712: True/False comparison (style)
+# F841: Unused variable (cleanup later)
+ignore = ["E501", "E402", "E712", "F841"]

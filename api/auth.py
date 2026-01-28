@@ -3,7 +3,7 @@ Authentication endpoints for GitHub OAuth
 Handles user login, token refresh, and session management
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Response, Cookie, Request
+from fastapi import APIRouter, HTTPException, Depends, Response, Cookie
 from fastapi import Request as FastAPIRequest
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -17,7 +17,6 @@ from cryptography.fernet import Fernet
 
 from api.database import get_db, User
 from api.models import (
-    GitHubAuthResponse,
     UserResponse,
     TokenRefreshResponse,
 )
@@ -41,12 +40,12 @@ cipher = Fernet(ENCRYPTION_KEY.encode())
 
 def encrypt_token(token: str) -> str:
     """Encrypt a token for storage"""
-    return cipher.encrypt(token.encode()).decode()
+    return cipher.encrypt(token.encode()).decode()  # type: ignore[no-any-return]
 
 
 def decrypt_token(encrypted_token: str) -> str:
     """Decrypt a stored token"""
-    return cipher.decrypt(encrypted_token.encode()).decode()
+    return cipher.decrypt(encrypted_token.encode()).decode()  # type: ignore[no-any-return]
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -58,7 +57,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     
     to_encode.update({"exp": expire, "type": "access"})
-    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)  # type: ignore[no-any-return]
 
 
 def create_refresh_token(data: dict) -> str:
@@ -66,7 +65,7 @@ def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire, "type": "refresh"})
-    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)  # type: ignore[no-any-return]
 
 
 def verify_token(token: str, token_type: str = "access") -> dict:
@@ -75,7 +74,7 @@ def verify_token(token: str, token_type: str = "access") -> dict:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         if payload.get("type") != token_type:
             raise HTTPException(status_code=401, detail="Invalid token type")
-        return payload
+        return payload  # type: ignore[no-any-return]
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
@@ -226,9 +225,9 @@ async def github_oauth_callback(
             user.github_login = github_login
             user.email = email
             user.avatar_url = avatar_url
-            user.access_token_encrypted = encrypt_token(github_access_token)
-            user.last_login_at = datetime.utcnow()
-            user.updated_at = datetime.utcnow()
+            user.access_token_encrypted = encrypt_token(github_access_token)  # type: ignore[assignment]
+            user.last_login_at = datetime.utcnow()  # type: ignore[assignment]
+            user.updated_at = datetime.utcnow()  # type: ignore[assignment]
         else:
             # Create new user
             user = User(

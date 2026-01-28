@@ -3,7 +3,7 @@ Guardian Gateway - FastAPI Backend
 Main application entry point for the REST API
 """
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 import sys
 import os
 import logging
+import traceback
 
 # Configure logging
 logging.basicConfig(
@@ -21,30 +22,30 @@ logging.basicConfig(
 # Add parent directory to path to import core modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.workflow import run_triage, run_structuring
 from core.auditor import SpecAuditor
 from api.models import (
     GenerateSpecRequest,
     GenerateSpecResponse,
-    VerifyDafnyRequest,
-    VerifyDafnyResponse,
     ChatRequest,
     ChatResponse,
     HealthResponse,
-    Gap,
-    GapLocation,
-    Ambiguity,
-    TraceabilityEntry,
-    SpecStatistics,
+    FindGapsRequest,
+    FindGapsResponse,
+    RefineSpecRequest,
+    RefineSpecResponse,
 )
 from api.middleware import APIKeyMiddleware, RateLimitMiddleware, RequestLoggingMiddleware, SecurityScannerMiddleware
-from api.database import init_db
+from api.database import init_db, get_db
 from api import files
+from api.files import get_api_key_from_header
 from api import verification
 from api import deconstruct
 from api import projects
 from api import auth
+from api.auth import get_current_user
 from api.github import webhooks as github_webhooks
+from api.services.spec_generator import SpecGeneratorService
+from sqlalchemy.orm import Session
 
 
 @asynccontextmanager
@@ -84,7 +85,7 @@ app.add_middleware(
 # Note: Middleware is applied in reverse order (last added = first executed)
 # Order: SecurityScannerMiddleware -> RequestLoggingMiddleware -> RateLimitMiddleware -> APIKeyMiddleware
 app.add_middleware(RequestLoggingMiddleware)
-app.add_middleware(RateLimitMiddleware, requests_per_minute=int(os.getenv("RATE_LIMIT_PER_MINUTE", "60")))
+app.add_middleware(RateLimitMiddleware, requests_per_minute=int(os.getenv("RATE_LIMIT_PER_MINUTE", "300")))
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(SecurityScannerMiddleware)  # Runs first - blocks scanners before they hit rate limiting
 
@@ -98,6 +99,26 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(
         status_code=422,
         content={"detail": exc.errors()},
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler to catch and log all unhandled exceptions"""
+    logging.error(
+        f"Unhandled exception on {request.method} {request.url.path}:\n"
+        f"Exception type: {type(exc).__name__}\n"
+        f"Exception message: {str(exc)}\n"
+        f"Traceback:\n{traceback.format_exc()}"
+    )
+    
+    # Return a generic error response (don't expose internal details)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "error_type": type(exc).__name__
+        }
     )
 
 
@@ -127,95 +148,49 @@ async def health_check():
 
 
 @app.post("/api/generate/spec", response_model=GenerateSpecResponse)
-async def generate_spec(request: GenerateSpecRequest):
+async def generate_spec(
+    request: GenerateSpecRequest,
+    api_key: str = Depends(get_api_key_from_header),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
     """
     Generate formal specification from English requirements.
     Combines Triage + Structure + Audit stages.
+    Automatically assesses units and creates subfolder structure if units are found.
     """
-    # Stage 1: Triage
-    triage_result = run_triage(request.english_spec)
-    if triage_result.error:
-        raise HTTPException(status_code=400, detail=triage_result.error)
-    
-    # Stage 2: Structure
-    structure_result = run_structuring(request.english_spec)
-    if structure_result.error:
-        raise HTTPException(status_code=400, detail=structure_result.error)
-    
-    # Stage 3: Audit
-    auditor = SpecAuditor()
-    if not auditor.is_configured():
-        raise HTTPException(
-            status_code=500,
-            detail=auditor.get_configuration_error()
-        )
-    
-    audit_result = auditor.audit_spec(structure_result.structured_spec)
-    if audit_result.error:
-        raise HTTPException(status_code=500, detail=audit_result.error)
-    
-    # Enhanced gap processing with IDs and locations
-    enhanced_gaps = []
-    for idx, gap in enumerate(audit_result.gaps):
-        enhanced_gaps.append(Gap(
-            id=f"GAP-{idx+1:03d}",
-            severity=gap.severity if gap.severity in ["critical", "high", "medium", "low"] else "medium",
-            category="incomplete-spec",  # Default category, can be enhanced later
-            description=gap.description,
-            location=GapLocation(line=None, column=None, file=None),
-            suggestion=f"Consider adding more details about: {gap.description[:50]}...",
-            code_snippet=None
-        ))
-    
-    # Enhanced ambiguities with IDs
-    enhanced_ambiguities = []
-    for idx, amb_text in enumerate(audit_result.ambiguities):
-        enhanced_ambiguities.append(Ambiguity(
-            id=f"AMB-{idx+1:03d}",
-            text=amb_text,
-            possible_interpretations=["Interpretation A", "Interpretation B"],
-            recommendation="Please clarify this requirement"
-        ))
-    
-    # Enhanced traceability matrix
-    enhanced_traceability = []
-    for idx, entry in enumerate(audit_result.traceability_matrix):
-        enhanced_traceability.append(TraceabilityEntry(
-            id=entry.id,
-            source_text=entry.source_text,
-            code_line=entry.code_line,
-            line_number=None,
-            status=entry.status if entry.status in ["mapped", "partial", "missing"] else "mapped",
-            confidence=0.9
-        ))
-    
-    # Calculate statistics
-    total_reqs = len(enhanced_traceability)
-    mapped_reqs = sum(1 for e in enhanced_traceability if e.status == "mapped")
-    coverage = (mapped_reqs / total_reqs * 100) if total_reqs > 0 else 0
-    critical_gaps = sum(1 for g in enhanced_gaps if g.severity == "critical")
-    
-    statistics = SpecStatistics(
-        total_requirements=total_reqs,
-        mapped_requirements=mapped_reqs,
-        coverage_percentage=round(coverage, 2),
-        total_gaps=len(enhanced_gaps),
-        critical_gaps=critical_gaps
-    )
-    
-    return GenerateSpecResponse(
-        triage={
-            "doc_type": triage_result.doc_type.value if triage_result.doc_type else "junk",
-            "confidence": triage_result.confidence,
-            "detected_patterns": []  # Can be enhanced later
-        },
-        structured_spec=structure_result.structured_spec,
-        dafny_skeleton=audit_result.dafny_skeleton,
-        gaps=enhanced_gaps,
-        ambiguities=enhanced_ambiguities,
-        traceability_matrix=enhanced_traceability,
-        statistics=statistics
-    )
+    service = SpecGeneratorService(db, current_user)
+    return service.generate_spec(request, api_key)
+
+
+@app.post("/api/generate/find-gaps", response_model=FindGapsResponse)
+async def find_gaps(
+    request: FindGapsRequest,
+    api_key: str = Depends(get_api_key_from_header),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Find gaps and ambiguities in a specification without generating Dafny code.
+    Used for the refinement flow where users can fix gaps before generating formal specs.
+    """
+    service = SpecGeneratorService(db, current_user)
+    return service.find_gaps(request)
+
+
+@app.post("/api/generate/refine-spec", response_model=RefineSpecResponse)
+async def refine_spec(
+    request: RefineSpecRequest,
+    api_key: str = Depends(get_api_key_from_header),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Refine a specification by applying gap suggestions.
+    Uses Gemini to generate refined spec text with selected gap suggestions applied.
+    """
+    service = SpecGeneratorService(db, current_user)
+    return service.refine_spec(request)
 
 
 @app.post("/api/assistant/chat", response_model=ChatResponse)

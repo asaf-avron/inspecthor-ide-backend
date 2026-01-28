@@ -9,7 +9,6 @@ Uses Google Gemini to perform semantic analysis and generate Dafny skeletons.
 
 import os
 import json
-import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -21,8 +20,8 @@ try:
     from google import genai
     from google.genai import types
 except ImportError:
-    genai = None
-    types = None
+    genai = None  # type: ignore[assignment]
+    types = None  # type: ignore[assignment]
 
 from dotenv import load_dotenv
 
@@ -148,7 +147,7 @@ You MUST return ONLY valid JSON with this exact schema (no markdown, no explanat
 - Order of ensures clauses matters: structural integrity FIRST, then value-based postconditions"""
 
 
-def load_knowledge_base(path: str = None) -> Optional[str]:
+def load_knowledge_base(path: Optional[str] = None) -> Optional[str]:
     """
     Load Dafny reference documentation for RAG-enhanced analysis.
     
@@ -201,7 +200,8 @@ class SpecAuditor:
                      GEMINI_API_KEY environment variable.
         """
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        self._model = None
+        self._model: Optional[str] = None
+        self._init_error: Optional[str] = None
         
         if genai is None:
             self._init_error = "google-genai package not installed. Run: pip install google-genai"
@@ -267,11 +267,13 @@ class SpecAuditor:
         
         try:
             # Call Gemini API with new SDK
+            if not self._model:
+                return GapReport(error="Model not configured")
             response = self._client.models.generate_content(
                 model=self._model,
                 contents=prompt
             )
-            raw_text = response.text
+            raw_text = response.text or ""
             
             # Parse the JSON response
             return self._parse_response(raw_text)
@@ -400,11 +402,13 @@ RULES:
         
         try:
             # Call Gemini API
+            if not self._model:
+                return None
             response = self._client.models.generate_content(
                 model=self._model,
                 contents=suggestion_prompt
             )
-            raw_text = response.text
+            raw_text = response.text or ""
             
             # Parse the JSON response
             cleaned = raw_text.strip()
@@ -426,7 +430,7 @@ RULES:
                 rationale=data.get("rationale", "")
             )
             
-        except Exception as e:
+        except Exception:
             # Return None on error - caller can handle gracefully
             return None
 

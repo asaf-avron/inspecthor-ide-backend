@@ -9,9 +9,6 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from github import Github, GithubIntegration, Auth
 from github.Repository import Repository
-from github.ContentFile import ContentFile
-from github.PullRequest import PullRequest
-from github.GitTree import GitTree
 from pydantic import BaseModel
 
 
@@ -266,7 +263,7 @@ class GitHubStatelessClient:
     ) -> str:
         """Get repository's default branch name."""
         repository = self._get_repo(installation_id, owner, repo)
-        return repository.default_branch
+        return str(repository.default_branch)  # type: ignore[no-any-return]
     
     async def get_ref(
         self,
@@ -327,7 +324,7 @@ class GitHubStatelessClient:
                 "content": item["content"]
             })
         
-        new_tree = repository.create_git_tree(tree_elements, base_tree)
+        new_tree = repository.create_git_tree(tree_elements, base_tree)  # type: ignore[arg-type]
         
         return {
             "sha": new_tree.sha,

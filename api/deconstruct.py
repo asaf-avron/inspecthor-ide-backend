@@ -55,8 +55,11 @@ class UnitIdentifier:
     """
     
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize with Gemini API key"""
-        self.auditor = SpecAuditor(api_key=api_key)
+        """
+        Initialize with Gemini API key.
+        Note: api_key parameter is deprecated - uses GEMINI_API_KEY from environment.
+        """
+        self.auditor = SpecAuditor()  # Uses GEMINI_API_KEY from environment
         
     def identify_units(self, markdown_content: str) -> List[UnitCandidate]:
         """
@@ -99,11 +102,13 @@ Return JSON array of units:"""
 
         try:
             # Call Gemini API
+            if not self.auditor._model:
+                raise ValueError("Model not configured")
             response = self.auditor._client.models.generate_content(
                 model=self.auditor._model,
                 contents=prompt
             )
-            raw_text = response.text
+            raw_text = response.text or ""
             
             # Clean up response
             cleaned = raw_text.strip()
@@ -200,7 +205,7 @@ def extract_content_by_lines(content: str, start_line: int, end_line: int) -> st
     return "\n".join(lines[start_idx:end_idx])
 
 
-def create_unit_filename(index: int, title: str, extension: str) -> str:
+def create_unit_filename(index: int, title: str, extension: str, subfolder_prefix: str = "") -> str:
     """
     Create filename for unit file.
     
@@ -208,14 +213,18 @@ def create_unit_filename(index: int, title: str, extension: str) -> str:
         index: Sequential unit number (1-indexed)
         title: Unit title
         extension: File extension (.unit.md or .dfy)
+        subfolder_prefix: Optional subfolder path prefix (e.g., "spec-units")
         
     Returns:
-        Formatted filename
+        Formatted filename with optional subfolder path
     """
     # Slugify title
     slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
     slug = slug[:50]  # Limit length
-    return f"unit-{index:03d}-{slug}{extension}"
+    filename = f"unit-{index:03d}-{slug}{extension}"
+    if subfolder_prefix:
+        return f"{subfolder_prefix}/{filename}"
+    return filename
 
 
 @router.post("/deconstruct", response_model=DeconstructResponse)
@@ -255,9 +264,9 @@ async def deconstruct_specification(
             detail="Only markdown files can be deconstructed"
         )
     
-    # Initialize unit identifier
-    identifier = UnitIdentifier(api_key=api_key)
-    auditor = SpecAuditor(api_key=api_key)
+    # Initialize unit identifier (uses GEMINI_API_KEY from environment)
+    identifier = UnitIdentifier()
+    auditor = SpecAuditor()
     
     if not auditor.is_configured():
         raise HTTPException(
@@ -267,7 +276,7 @@ async def deconstruct_specification(
     
     # Identify units
     try:
-        unit_candidates = identifier.identify_units(source_file.content)
+        unit_candidates = identifier.identify_units(str(source_file.content))  # type: ignore[arg-type]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
@@ -286,7 +295,7 @@ async def deconstruct_specification(
         try:
             # Extract content for this unit
             unit_content = extract_content_by_lines(
-                source_file.content,
+                str(source_file.content),  # type: ignore[arg-type]
                 candidate.line_range[0],
                 candidate.line_range[1]
             )
@@ -448,12 +457,12 @@ async def get_file_traceability(
         links.append(TraceabilityLink(
             unit_id=str(link.unit_file_id),
             dafny_file_id=str(link.dafny_file_id),
-            title=link.title or "Untitled Unit",
+            title=str(link.title) if link.title else "Untitled Unit",  # type: ignore[arg-type]
             source_range={
                 "start_line": link.start_line,
                 "end_line": link.end_line
             },
-            status=link.verification_status or "unknown"
+            status=str(link.verification_status) if link.verification_status else "unknown"  # type: ignore[arg-type]
         ))
     
     return TraceabilityResponse(
