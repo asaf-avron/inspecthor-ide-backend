@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import uuid
 from datetime import datetime
+import icontract
 
 from api.database import get_db, hash_api_key, File as DBFile, Project as DBProject, User
 from api.models import (
@@ -65,6 +66,23 @@ def get_project_owner_filter(user: Optional[User] = None, api_key_hash_value: Op
         return false()
 
 
+@icontract.require(
+    lambda request, api_key, db, current_user:
+        request is not None and
+        request.project_id is not None and
+        request.filename is not None and
+        len(request.filename) > 0 and
+        request.content is not None and
+        db is not None,
+    "Preconditions: Valid request, non-empty filename, db session exists"
+)
+@icontract.ensure(
+    lambda result, request, api_key, db, current_user, OLD:
+        result is not None and
+        result.file_id is not None and
+        result.filename == request.filename,
+    "Postconditions: File saved successfully with matching filename"
+)
 @router.post("/save", response_model=FileSaveResponse)
 async def save_file(
     request: FileSaveRequest,
@@ -197,6 +215,22 @@ async def list_files(
     )
 
 
+@icontract.require(
+    lambda file_id, request, api_key, db, current_user:
+        file_id is not None and
+        len(file_id) > 0 and
+        request is not None and
+        request.content is not None and
+        db is not None,
+    "Preconditions: Valid file_id, non-empty content, db session exists"
+)
+@icontract.ensure(
+    lambda result, file_id, request, api_key, db, current_user, OLD:
+        result is not None and
+        result.file_id == file_id and
+        result.content == request.content,
+    "Postconditions: File updated successfully with matching content"
+)
 @router.put("/{file_id}", response_model=FileResponse)
 async def update_file(
     file_id: str,
@@ -256,6 +290,20 @@ async def update_file(
     )
 
 
+@icontract.require(
+    lambda file_id, api_key, db, current_user:
+        file_id is not None and
+        len(file_id) > 0 and
+        db is not None,
+    "Preconditions: Valid file_id, db session exists"
+)
+@icontract.ensure(
+    lambda result, file_id, api_key, db, current_user, OLD:
+        result is not None and
+        result.get("deleted") == True and
+        result.get("file_id") == file_id,
+    "Postconditions: File deleted successfully"
+)
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: str,

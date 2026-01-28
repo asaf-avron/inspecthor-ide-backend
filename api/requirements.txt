@@ -21,4 +21,6 @@ tree-sitter-typescript>=0.21.0
 # Google Gemini for Transpiler
 google-generativeai>=0.3.0
 
+# Runtime Contract Enforcement (Spec-First Architecture)
+icontract>=2.6.0
 
