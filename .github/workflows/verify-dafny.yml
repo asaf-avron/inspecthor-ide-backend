@@ -26,12 +26,12 @@ jobs:
       
       - name: Build Docker image
         run: |
-          docker-compose build api
+          docker compose build api
       
       - name: Verify Dafny specifications
         run: |
           # Verify all Dafny files in api/verification/
-          docker-compose run --rm api dafny verify api/verification/*.dfy
+          docker compose run --rm api dafny verify api/verification/*.dfy
       
       - name: Check verification results
         if: failure()
