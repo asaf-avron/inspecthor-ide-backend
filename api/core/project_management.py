@@ -49,6 +49,7 @@ def _check_project_ownership(state: SystemState, project_id: str, owner_id: str)
         _project_name_unique(state, name, owner),
     "Preconditions: Valid state, unique project ID, name length 1-255, description <= 1000, name unique for owner"
 )
+@icontract.snapshot(lambda state, new_project_id, name, description, owner: state.projects.keys(), name="old_project_ids")
 @icontract.ensure(
     lambda result, state, new_project_id, name, description, owner, OLD:
         result[0].validate() and
@@ -106,13 +107,14 @@ def create_project_core(
         _check_project_ownership(state, project_id, owner_id),
     "Preconditions: Valid state, project exists, owner matches"
 )
+@icontract.snapshot(lambda state, project_id, owner_id: state.files.keys(), name="old_file_ids")
 @icontract.ensure(
     lambda result, state, project_id, owner_id, OLD:
         result[0].validate() and
         (result[1].success == True) == (
             project_id not in result[0].projects and
-            all(fid not in result[0].files for fid in OLD.get_value(lambda: state.files.keys()) 
-                if OLD.get_value(lambda: state.files[fid]).project_id == project_id)
+            all(fid not in result[0].files for fid in OLD.old_file_ids 
+                if state.files.get(fid) and state.files[fid].project_id == project_id)
         ),
     "Postconditions: Valid state, project and all its files deleted iff success"
 )
