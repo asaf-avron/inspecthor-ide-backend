@@ -451,7 +451,7 @@ async def get_file_traceability(
     
     # Query unit links
     unit_links = db.query(DBUnitLink).filter(
-        DBUnitLink.root_file_id == file_id
+        DBUnitLink.root_file_id == uuid.UUID(file_id)
     ).all()
     
     # Format response
