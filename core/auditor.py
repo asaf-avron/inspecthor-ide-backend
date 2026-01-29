@@ -324,8 +324,13 @@ class SpecAuditor:
             dafny_skeleton = data.get("dafny_skeleton", "")
             if isinstance(dafny_skeleton, str):
                 dafny_skeleton = dafny_skeleton.replace("\\n", "\n")
-                # Strip any HTML tags that may have leaked from LLM output
+                # Strip any HTML tags and fragments that may have leaked from LLM output
+                # Remove standard HTML tags
                 dafny_skeleton = re.sub(r'<[^>]+>', '', dafny_skeleton)
+                # Remove orphaned closing tags and class/style fragments like "text-syntax-keyword">
+                dafny_skeleton = re.sub(r'"[^"]*">', '', dafny_skeleton)
+                # Remove any remaining angle brackets
+                dafny_skeleton = re.sub(r'[<>]', '', dafny_skeleton)
             
             # Extract tagged spec and unescape newlines
             tagged_spec = data.get("tagged_spec", "")
