@@ -163,7 +163,7 @@ class WorkflowManager:
     """
     
     FLASH_MODEL = "models/gemini-1.5-flash"
-    PRO_MODEL = "models/gemini-1.5-pro"
+    PRO_MODEL = "models/gemini-1.5-flash"  # Using flash for both since pro is not available
     FALLBACK_MODEL = "models/gemini-1.5-flash"
     
     def __init__(self, api_key: Optional[str] = None):
