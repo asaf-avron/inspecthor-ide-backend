@@ -9,6 +9,7 @@ Uses Google Gemini to perform semantic analysis and generate Dafny skeletons.
 
 import os
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -323,6 +324,8 @@ class SpecAuditor:
             dafny_skeleton = data.get("dafny_skeleton", "")
             if isinstance(dafny_skeleton, str):
                 dafny_skeleton = dafny_skeleton.replace("\\n", "\n")
+                # Strip any HTML tags that may have leaked from LLM output
+                dafny_skeleton = re.sub(r'<[^>]+>', '', dafny_skeleton)
             
             # Extract tagged spec and unescape newlines
             tagged_spec = data.get("tagged_spec", "")
