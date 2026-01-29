@@ -112,7 +112,7 @@ For each atomic requirement:
 3. **Missing Preconditions/Postconditions**: What should be guaranteed before and after operations
 
 ## OUTPUT FORMAT:
-You MUST return ONLY valid JSON with this exact schema (no markdown, no explanation):
+You MUST return ONLY valid JSON with this exact schema (no markdown, no explanation, no HTML tags, no syntax highlighting):
 {
   "gaps": [
     {"severity": "critical", "description": "Description of the gap"},
@@ -129,6 +129,11 @@ You MUST return ONLY valid JSON with this exact schema (no markdown, no explanat
   ],
   "dafny_skeleton": "trait SpecName {\\n  // [REF-01] comment\\n  // Dafny code here\\n}"
 }
+
+## CRITICAL OUTPUT RULES:
+- Return PLAIN JSON ONLY - no markdown code blocks, no HTML tags, no syntax highlighting
+- All string values must be PLAIN TEXT - do not wrap code in <span>, <div>, or any HTML elements
+- The dafny_skeleton field must contain PLAIN Dafny code with no HTML formatting
 
 ## RULES:
 - severity must be either "critical" or "warning"
