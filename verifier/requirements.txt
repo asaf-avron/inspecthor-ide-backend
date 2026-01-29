@@ -1,0 +1,6 @@
+# Dafny Verification Service - Minimal Dependencies
+# No database, no external APIs, no secrets
+
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
