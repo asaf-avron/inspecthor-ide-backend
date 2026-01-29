@@ -68,20 +68,35 @@ jobs:
       
       - name: Verify Dafny Specifications
         run: |
-          # Verify each Dafny file in api/verification/
+          # Dafny files are organized in groups based on dependencies:
+          # 1. Standalone files (no imports)
+          # 2. Files that import DatabaseModel from models.dfy
+          
           EXIT_CODE=0
           
-          for file in api/verification/*.dfy; do
+          # Helper function to verify a file or group of files
+          verify_files() {
+            local description="$1"
+            shift
+            local files=("$@")
+            
             echo "=========================================="
-            echo "Verifying: $file"
+            echo "Verifying: $description"
             echo "=========================================="
             
-            # Read file content and send to verifier
-            CONTENT=$(cat "$file" | jq -Rs .)
+            # Concatenate all files into a single payload
+            COMBINED_CONTENT=""
+            for file in "${files[@]}"; do
+              if [ -f "$file" ]; then
+                COMBINED_CONTENT+="$(cat "$file")"$'\n\n'
+              fi
+            done
             
+            # Send to verifier
+            CONTENT=$(echo "$COMBINED_CONTENT" | jq -Rs .)
             RESPONSE=$(curl -s -X POST http://localhost:8001/verify \
               -H "Content-Type: application/json" \
-              -d "{\"dafny_code\": $CONTENT, \"timeout_seconds\": 120}")
+              -d "{\"dafny_code\": $CONTENT, \"timeout_seconds\": 180}")
             
             # Check if verified
             VERIFIED=$(echo "$RESPONSE" | jq -r '.verified')
@@ -89,16 +104,46 @@ jobs:
             
             if [ "$VERIFIED" = "true" ]; then
               echo "✓ VERIFIED in ${TIME_MS}ms"
+              return 0
             else
               echo "✗ FAILED"
               echo "Errors:"
-              echo "$RESPONSE" | jq -r '.errors[] | "  Line \(.line): \(.message)"'
+              echo "$RESPONSE" | jq -r '.errors[] | "  Line \(.line): \(.message)"' 2>/dev/null || echo "  (error parsing response)"
               echo ""
               echo "Solver output:"
               echo "$RESPONSE" | jq -r '.solver_output'
-              EXIT_CODE=1
+              return 1
             fi
-            echo ""
+          }
+          
+          # Group 1: Standalone files (no module imports)
+          echo ""
+          echo "=== Group 1: Standalone specifications ==="
+          echo ""
+          
+          # models.dfy - the base module
+          verify_files "models.dfy (DatabaseModel)" api/verification/models.dfy || EXIT_CODE=1
+          echo ""
+          
+          # crypto_contract.dfy - standalone, no imports
+          verify_files "crypto_contract.dfy (Crypto)" api/verification/crypto_contract.dfy || EXIT_CODE=1
+          echo ""
+          
+          # Group 2: Files that depend on DatabaseModel
+          echo ""
+          echo "=== Group 2: Specifications with DatabaseModel dependency ==="
+          echo ""
+          
+          # Verify each dependent file WITH models.dfy
+          for file in api/verification/file_operations.dfy \
+                      api/verification/project_management.dfy \
+                      api/verification/project_migration.dfy \
+                      api/verification/spec_generation.dfy \
+                      api/verification/traceability.dfy; do
+            if [ -f "$file" ]; then
+              verify_files "$(basename $file) + models.dfy" api/verification/models.dfy "$file" || EXIT_CODE=1
+              echo ""
+            fi
           done
           
           exit $EXIT_CODE
