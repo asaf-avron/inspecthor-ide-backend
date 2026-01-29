@@ -330,12 +330,24 @@ class SpecAuditor:
             if isinstance(dafny_skeleton, str):
                 dafny_skeleton = dafny_skeleton.replace("\\n", "\n")
                 # Strip any HTML tags and fragments that may have leaked from LLM output
-                # Remove standard HTML tags
-                dafny_skeleton = re.sub(r'<[^>]+>', '', dafny_skeleton)
-                # Remove orphaned closing tags and class/style fragments like "text-syntax-keyword">
+                # Strategy: Attributes first, then orphaned tags, then cleanup
+                
+                # 0. Log original for debugging
+                print(f"DEBUG: Original Dafny Skeleton (first 100 chars): {dafny_skeleton[:100]!r}")
+                
+                # 1. Remove attributes first (class="...", style="...")
+                dafny_skeleton = re.sub(r'\b[a-z-]+="[^"]*"', '', dafny_skeleton)
+                
+                # 2. Remove orphaned tag endings like "text-syntax-keyword">
                 dafny_skeleton = re.sub(r'"[^"]*">', '', dafny_skeleton)
-                # Remove any remaining angle brackets
+                
+                # 3. Remove standard HTML tags
+                dafny_skeleton = re.sub(r'<[^>]*>', '', dafny_skeleton)
+                
+                # 4. Remove any remaining angle brackets
                 dafny_skeleton = re.sub(r'[<>]', '', dafny_skeleton)
+                
+                print(f"DEBUG: Cleaned Dafny Skeleton (first 100 chars): {dafny_skeleton[:100]!r}")
             
             # Extract tagged spec and unescape newlines
             tagged_spec = data.get("tagged_spec", "")
