@@ -1,6 +1,11 @@
 """
 Authentication endpoints for GitHub OAuth
 Handles user login, token refresh, and session management
+
+Architecture:
+- This module is the Imperative Shell for authentication
+- Token encryption is delegated to AuthService (which uses core/security/crypto.py)
+- See api/verification/crypto_contract.dfy for formal specification
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Response, Cookie
@@ -14,13 +19,13 @@ import os
 import logging
 import uuid
 from jose import JWTError, jwt
-from cryptography.fernet import Fernet
 
 from api.database import get_db, User
 from api.models import (
     UserResponse,
     TokenRefreshResponse,
 )
+from api.services.auth_service import get_auth_service
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
@@ -34,19 +39,18 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
-# Encryption key for storing GitHub tokens
-ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
-cipher = Fernet(ENCRYPTION_KEY.encode())
 
-
+# Legacy compatibility wrappers for encrypt_token/decrypt_token
+# These delegate to AuthService for actual encryption
+# TODO: Remove these once all callers are migrated to use AuthService directly
 def encrypt_token(token: str) -> str:
-    """Encrypt a token for storage"""
-    return cipher.encrypt(token.encode()).decode()  # type: ignore[no-any-return]
+    """Encrypt a token for storage (legacy wrapper)"""
+    return get_auth_service().encrypt_github_token(token)
 
 
 def decrypt_token(encrypted_token: str) -> str:
-    """Decrypt a stored token"""
-    return cipher.decrypt(encrypted_token.encode()).decode()  # type: ignore[no-any-return]
+    """Decrypt a stored token (legacy wrapper)"""
+    return get_auth_service().decrypt_github_token(encrypted_token)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -228,13 +232,14 @@ async def github_oauth_callback(
         
         # Create or update user in database
         user = db.query(User).filter(User.github_id == github_id).first()
+        auth_service = get_auth_service()
         
         if user:
             # Update existing user
             user.github_login = github_login
             user.email = email
             user.avatar_url = avatar_url
-            user.access_token_encrypted = encrypt_token(github_access_token)  # type: ignore[assignment]
+            user.access_token_encrypted = auth_service.encrypt_github_token(github_access_token)  # type: ignore[assignment]
             user.last_login_at = datetime.utcnow()  # type: ignore[assignment]
             user.updated_at = datetime.utcnow()  # type: ignore[assignment]
         else:
@@ -244,7 +249,7 @@ async def github_oauth_callback(
                 github_login=github_login,
                 email=email,
                 avatar_url=avatar_url,
-                access_token_encrypted=encrypt_token(github_access_token),
+                access_token_encrypted=auth_service.encrypt_github_token(github_access_token),
                 tier='free',
                 verification_credits=10,
                 last_login_at=datetime.utcnow()

@@ -1,4 +1,4 @@
-This is InspecThor Oracle. Based on the source files you provided (`files.py`, `projects.py`, `database.py`, `deconstruct.py`), the `UI_API_MAPPING.md`, and your architecture goals, I have constructed a comprehensive **Transition Plan** for your coding agent.
+This is InspecThor Oracle. Based on the source files you provided (`files.py`, `projects.py`, `database.py`, `deconstruct.py`), the `development/UI_API_MAPPING.md`, and your architecture goals, I have constructed a comprehensive **Transition Plan** for your coding agent.
 
 This plan bridges the gap between your current Python implementation and the **Spec-First InspecThor Architecture**, moving from a manual implementation to an automated **Synthesis Loop**.
 
