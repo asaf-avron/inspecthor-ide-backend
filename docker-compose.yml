@@ -72,6 +72,9 @@ services:
       # Database connection
       # Use SQLite for persistence (or PostgreSQL: postgresql://guardian:${DB_PASSWORD:-guardian_dev_password}@db:5432/guardian_gateway)
       DATABASE_URL: ${DATABASE_URL:-sqlite:///./guardian_gateway.db}
+      
+      # Persist data across restarts (set to true to reset on restart)
+      DROP_EXISTING_TABLES: ${DROP_EXISTING_TABLES:-false}
 
       # API Configuration
       GEMINI_API_KEY: ${GEMINI_API_KEY}
