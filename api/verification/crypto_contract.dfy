@@ -23,8 +23,10 @@ datatype DecryptResult =
  * 
  * A valid Fernet key is 32 bytes of random data, base64-encoded.
  * The base64 encoding of 32 bytes produces 44 characters.
+ * 
+ * Note: We use 'string' to represent the key since it's base64-encoded.
  */
-predicate ValidKey(key: seq<byte>) {
+predicate ValidKey(key: string) {
   |key| == 44  // Base64-encoded 32-byte Fernet key
 }
 
@@ -33,13 +35,13 @@ predicate ValidKey(key: seq<byte>) {
  * Encrypt plaintext using a Fernet key.
  * 
  * Preconditions:
- *   - Key must be valid (44 bytes, base64-encoded)
+ *   - Key must be valid (44 characters, base64-encoded)
  * 
  * Postconditions:
  *   - On success, ciphertext is non-empty
  *   - Encryption is non-deterministic (random IV)
  */
-function method Encrypt(key: seq<byte>, plaintext: string): EncryptResult
+function Encrypt(key: string, plaintext: string): EncryptResult
   requires ValidKey(key)
   ensures Encrypt(key, plaintext).EncryptSuccess? ==> 
           |Encrypt(key, plaintext).ciphertext| > 0
@@ -54,14 +56,14 @@ function method Encrypt(key: seq<byte>, plaintext: string): EncryptResult
  * Decrypt ciphertext using a Fernet key.
  * 
  * Preconditions:
- *   - Key must be valid (44 bytes, base64-encoded)
+ *   - Key must be valid (44 characters, base64-encoded)
  *   - Ciphertext must be non-empty
  * 
  * Postconditions:
  *   - On success, plaintext is returned
  *   - On failure (wrong key, corrupted data), error is returned
  */
-function method Decrypt(key: seq<byte>, ciphertext: string): DecryptResult
+function Decrypt(key: string, ciphertext: string): DecryptResult
   requires ValidKey(key)
   requires |ciphertext| > 0
 {
@@ -78,7 +80,7 @@ function method Decrypt(key: seq<byte>, ciphertext: string): DecryptResult
  * 
  * This is the fundamental correctness property of symmetric encryption.
  */
-predicate RoundTripSafe(key: seq<byte>, data: string)
+predicate RoundTripSafe(key: string, data: string)
   requires ValidKey(key)
 {
   var encrypted := Encrypt(key, data);
@@ -94,7 +96,7 @@ predicate RoundTripSafe(key: seq<byte>, data: string)
  * If ciphertext was encrypted with key1, decrypting with key2 (where key1 != key2)
  * should fail with DecryptFailure.
  */
-predicate WrongKeyFails(key1: seq<byte>, key2: seq<byte>, plaintext: string)
+predicate WrongKeyFails(key1: string, key2: string, plaintext: string)
   requires ValidKey(key1)
   requires ValidKey(key2)
   requires key1 != key2
@@ -116,7 +118,7 @@ predicate WrongKeyFails(key1: seq<byte>, key2: seq<byte>, plaintext: string)
  * - Frequency analysis attacks
  * - Known-plaintext attacks
  */
-lemma Theorem_NonDeterministic(key: seq<byte>, data: string)
+lemma Theorem_NonDeterministic(key: string, data: string)
   requires ValidKey(key)
   // Note: We cannot prove this in Dafny as functions are deterministic.
   // This lemma documents the behavior of the actual Fernet implementation.
@@ -132,7 +134,7 @@ lemma Theorem_NonDeterministic(key: seq<byte>, data: string)
  * Fernet can encrypt empty strings. The ciphertext will still be
  * non-empty due to the IV and authentication tag.
  */
-lemma Theorem_EmptyPlaintextAllowed(key: seq<byte>)
+lemma Theorem_EmptyPlaintextAllowed(key: string)
   requires ValidKey(key)
   ensures Encrypt(key, "").EncryptSuccess?
   ensures |Encrypt(key, "").ciphertext| > 0
