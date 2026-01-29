@@ -188,8 +188,8 @@ class SpecAuditor:
     Postconditions: Returns a GapReport with analysis results or error.
     """
     
-    DEFAULT_MODEL = "models/gemini-2.0-flash-exp"
-    FALLBACK_MODEL = "models/gemini-2.5-flash"
+    DEFAULT_MODEL = "models/gemini-1.5-flash"
+    FALLBACK_MODEL = "models/gemini-1.5-flash"
     
     def __init__(self, api_key: Optional[str] = None):
         """
