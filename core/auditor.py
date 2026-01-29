@@ -53,6 +53,7 @@ class TraceabilityEntry:
     source_text: str
     status: str = "Pending"  # Pending | Implemented | Verified | Missing | Obsolete
     code_line: str = ""
+    line_number: Optional[int] = None
 
 
 @dataclass
@@ -354,14 +355,28 @@ class SpecAuditor:
             if isinstance(tagged_spec, str):
                 tagged_spec = tagged_spec.replace("\\n", "\n")
             
+            # Create line number map by scanning Dafny skeleton
+            ref_line_map = {}
+            if isinstance(dafny_skeleton, str):
+                for i, line in enumerate(dafny_skeleton.split('\n')):
+                    # Use regex to find ANY [REF-XX] tags in the line
+                    matches = re.findall(r'\[(REF-[\w-]+)\]', line)
+                    for match in matches:
+                         if match not in ref_line_map:
+                             ref_line_map[match] = i + 1
+
             # Extract traceability matrix
             traceability_matrix = []
             for entry_data in data.get("traceability_matrix", []):
+                ref_id = entry_data.get("id", "")
+                actual_line = ref_line_map.get(ref_id)
+                
                 traceability_matrix.append(TraceabilityEntry(
-                    id=entry_data.get("id", ""),
+                    id=ref_id,
                     source_text=entry_data.get("source_text", ""),
                     status=entry_data.get("status", "Pending"),
-                    code_line=entry_data.get("code_line", "")
+                    code_line=entry_data.get("code_line", ""),
+                    line_number=actual_line
                 ))
             
             return GapReport(
