@@ -169,8 +169,8 @@ class CodeVerifier:
     Postconditions: Returns a VerificationResult with verification status.
     """
     
-    DEFAULT_MODEL = "models/gemini-1.5-flash-001"
-    FALLBACK_MODEL = "models/gemini-1.5-flash-001"
+    DEFAULT_MODEL = "gemini-1.5-flash-001"
+    FALLBACK_MODEL = "gemini-1.5-flash-001"
     
     def __init__(self, api_key: Optional[str] = None):
         """
