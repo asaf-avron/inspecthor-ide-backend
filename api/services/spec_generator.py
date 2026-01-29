@@ -583,7 +583,7 @@ Filename:"""
                 id=entry.id,
                 source_text=entry.source_text,
                 code_line=entry.code_line,
-                line_number=None,
+                line_number=entry.line_number,
                 status=cast(Literal["mapped", "partial", "missing"], entry.status if entry.status in ["mapped", "partial", "missing"] else "mapped"),
                 confidence=0.9
             ))
