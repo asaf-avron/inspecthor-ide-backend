@@ -162,9 +162,9 @@ class WorkflowManager:
     4. Approve: Finalize with risk assessment
     """
     
-    FLASH_MODEL = "gemini-1.5-flash-001"
-    PRO_MODEL = "gemini-1.5-flash-001"  # Using flash for both since pro is not available
-    FALLBACK_MODEL = "gemini-1.5-flash-001"
+    FLASH_MODEL = "gemini-2.0-flash-001"
+    PRO_MODEL = "gemini-2.0-flash-001"
+    FALLBACK_MODEL = "gemini-2.0-flash-001"
     
     def __init__(self, api_key: Optional[str] = None):
         """
