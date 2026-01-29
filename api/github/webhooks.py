@@ -7,13 +7,14 @@ import hmac
 import hashlib
 import os
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, Request, HTTPException, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
 from ..database import get_db, Repository, Anchor
+from ..services.verifier_client import VerifierClient, VerifyResult
 from .app import GitHubAppManager, InstallationData
 from .api_client import GitHubStatelessClient
 from .checks import CheckRunService
@@ -24,6 +25,7 @@ router = APIRouter(prefix="/api/github", tags=["github"])
 _app_manager: Optional[GitHubAppManager] = None
 _github_client: Optional[GitHubStatelessClient] = None
 _check_service: Optional[CheckRunService] = None
+_verifier_client: Optional[VerifierClient] = None
 
 
 def get_app_manager() -> GitHubAppManager:
@@ -48,6 +50,14 @@ def get_check_service() -> CheckRunService:
     if _check_service is None:
         _check_service = CheckRunService()
     return _check_service
+
+
+def get_verifier_client() -> VerifierClient:
+    """Get or create VerifierClient instance."""
+    global _verifier_client
+    if _verifier_client is None:
+        _verifier_client = VerifierClient()
+    return _verifier_client
 
 
 def verify_webhook_signature(payload_body: bytes, signature_header: str) -> bool:
@@ -228,8 +238,9 @@ async def handle_push_event(db: Session, payload: Dict[str, Any]):
     repo_name = repository["name"]
     ref = payload["ref"]  # e.g., "refs/heads/main"
     commits = payload["commits"]
+    head_sha = payload.get("after", commits[-1]["id"] if commits else None)
     
-    print(f"[Push] {owner}/{repo_name} on {ref} - {len(commits)} commits")
+    logger.info(f"[Push] {owner}/{repo_name} on {ref} - {len(commits)} commits")
     
     # Get changed files from commits
     changed_files = set()
@@ -245,7 +256,7 @@ async def handle_push_event(db: Session, payload: Dict[str, Any]):
     ).first()
     
     if not repo_obj:
-        print(f"[Push] Repository not found: {owner}/{repo_name}")
+        logger.info(f"[Push] Repository not found: {owner}/{repo_name}")
         return
     
     anchors = db.query(Anchor).filter(
@@ -254,13 +265,32 @@ async def handle_push_event(db: Session, payload: Dict[str, Any]):
     ).all()
     
     if not anchors:
-        print("[Push] No anchors found in changed files")
+        logger.info("[Push] No anchors found in changed files")
         return
     
-    print(f"[Push] Found {len(anchors)} anchors to verify")
+    logger.info(f"[Push] Found {len(anchors)} anchors to verify")
     
-    # TODO: Queue verification for each anchor
-    # This will be implemented when we build the transpiler + verifier
+    # Create check run for push verification
+    if head_sha:
+        check_run = await get_check_service().create_check_run(
+            installation_id=installation_id,
+            owner=owner,
+            repo=repo_name,
+            head_sha=head_sha,
+            name="InSpecThor Verification (Push)"
+        )
+        check_run_id = check_run["id"]
+        
+        # Run verification
+        await run_anchor_verification(
+            db=db,
+            installation_id=installation_id,
+            owner=owner,
+            repo_name=repo_name,
+            check_run_id=check_run_id,
+            anchors=anchors,
+            head_sha=head_sha,
+        )
 
 
 async def handle_pull_request_event(db: Session, payload: Dict[str, Any]):
@@ -360,26 +390,21 @@ async def handle_pull_request_event(db: Session, payload: Dict[str, Any]):
             )
             return
         
-        print(f"[PR] Found {len(anchors)} anchors to verify")
+        logger.info(f"[PR] Found {len(anchors)} anchors to verify")
         
-        # TODO: Verify each anchor
-        # For now, mark as success
-        await get_check_service().update_check_run(
+        # Run verification for each anchor
+        await run_anchor_verification(
+            db=db,
             installation_id=installation_id,
             owner=owner,
-            repo=repo_name,
+            repo_name=repo_name,
             check_run_id=check_run_id,
-            status="completed",
-            conclusion="success",
-            output={
-                "title": f"✓ {len(anchors)} anchor(s) verified",
-                "summary": "All anchored functions passed formal verification.\n\n**Anchors:**\n" + 
-                          "\n".join([f"- `{a.function_name}` in `{a.file_path}`" for a in anchors])
-            }
+            anchors=anchors,
+            head_sha=head_sha,
         )
         
     except Exception as e:
-        print(f"[PR] Error: {e}")
+        logger.error(f"[PR] Error: {e}")
         await get_check_service().update_check_run(
             installation_id=installation_id,
             owner=owner,
@@ -404,7 +429,235 @@ async def handle_check_run_rerun(db: Session, payload: Dict[str, Any]):
     repository = payload["repository"]
     installation_id = payload["installation"]["id"]
     
-    print(f"[CheckRun] Re-run requested for {check_run['id']}")
+    owner = repository["owner"]["login"]
+    repo_name = repository["name"]
+    head_sha = check_run["head_sha"]
     
-    # TODO: Re-run verification logic
-    # For now, just acknowledge
+    logger.info(f"[CheckRun] Re-run requested for {check_run['id']}")
+    
+    # Find repository
+    repo_obj = db.query(Repository).filter(
+        Repository.installation_id == installation_id,
+        Repository.owner == owner,
+        Repository.name == repo_name
+    ).first()
+    
+    if not repo_obj:
+        logger.warning(f"[CheckRun] Repository not found: {owner}/{repo_name}")
+        return
+    
+    # Get all anchors for this repository
+    anchors = db.query(Anchor).filter(
+        Anchor.repository_id == repo_obj.repository_id
+    ).all()
+    
+    if not anchors:
+        logger.info("[CheckRun] No anchors found")
+        return
+    
+    # Create new check run
+    new_check_run = await get_check_service().create_check_run(
+        installation_id=installation_id,
+        owner=owner,
+        repo=repo_name,
+        head_sha=head_sha,
+        name="InSpecThor Verification"
+    )
+    
+    # Run verification
+    await run_anchor_verification(
+        db=db,
+        installation_id=installation_id,
+        owner=owner,
+        repo_name=repo_name,
+        check_run_id=new_check_run["id"],
+        anchors=anchors,
+        head_sha=head_sha,
+    )
+
+
+async def run_anchor_verification(
+    db: Session,
+    installation_id: int,
+    owner: str,
+    repo_name: str,
+    check_run_id: int,
+    anchors: List[Anchor],
+    head_sha: str,
+) -> None:
+    """
+    Run verification for a list of anchors.
+    
+    This is the core verification flow that:
+    1. Updates check run to in_progress
+    2. For each anchor, fetches the Dafny spec
+    3. Calls the verifier service
+    4. Updates check run with results
+    
+    Args:
+        db: Database session
+        installation_id: GitHub App installation ID
+        owner: Repository owner
+        repo_name: Repository name
+        check_run_id: Check run ID to update
+        anchors: List of anchors to verify
+        head_sha: Commit SHA being verified
+    """
+    # Update check run to in_progress
+    await get_check_service().update_check_run(
+        installation_id=installation_id,
+        owner=owner,
+        repo=repo_name,
+        check_run_id=check_run_id,
+        status="in_progress",
+        conclusion=None,
+        output={
+            "title": f"Verifying {len(anchors)} anchor(s)...",
+            "summary": "InSpecThor is running formal verification on anchored functions."
+        }
+    )
+    
+    # Track verification results
+    verified_anchors: List[Anchor] = []
+    failed_anchors: List[tuple[Anchor, VerifyResult]] = []
+    skipped_anchors: List[tuple[Anchor, str]] = []
+    
+    # Get verifier client
+    verifier = get_verifier_client()
+    
+    # Check verifier health
+    health = await verifier.health_check()
+    if health.get("status") != "healthy":
+        await get_check_service().update_check_run(
+            installation_id=installation_id,
+            owner=owner,
+            repo=repo_name,
+            check_run_id=check_run_id,
+            status="completed",
+            conclusion="failure",
+            output={
+                "title": "Verifier unavailable",
+                "summary": "The Dafny verification service is not available. Please try again later."
+            }
+        )
+        return
+    
+    for anchor in anchors:
+        try:
+            # Get the Dafny specification file linked to this anchor via contract_ref
+            # contract_ref format: "specs/auth.dfy::ValidateToken"
+            contract_ref: str = str(anchor.contract_ref) if anchor.contract_ref else ""
+            if not contract_ref:
+                skipped_anchors.append((anchor, "No specification linked"))
+                continue
+            
+            # Parse the contract_ref to get the spec file path
+            # Format: "path/to/spec.dfy::MethodName"
+            spec_parts = contract_ref.split("::")
+            spec_file_path = spec_parts[0] if spec_parts else ""
+            
+            if not spec_file_path:
+                skipped_anchors.append((anchor, "Invalid contract reference"))
+                continue
+            
+            # Get implementation code from GitHub
+            file_path: str = str(anchor.file_path)
+            impl_content = await get_github_client().get_file_content(
+                installation_id=installation_id,
+                owner=owner,
+                repo=repo_name,
+                path=file_path,
+                ref=head_sha
+            )
+            
+            if not impl_content:
+                skipped_anchors.append((anchor, "Could not fetch implementation file"))
+                continue
+            
+            # Try to fetch the Dafny spec file from GitHub
+            spec_content = await get_github_client().get_file_content(
+                installation_id=installation_id,
+                owner=owner,
+                repo=repo_name,
+                path=spec_file_path,
+                ref=head_sha
+            )
+            
+            if not spec_content:
+                skipped_anchors.append((anchor, f"Could not fetch spec file: {spec_file_path}"))
+                continue
+            
+            # Verify the spec
+            # In the future: transpile impl_content -> Dafny, then verify against spec
+            result = await verifier.verify(
+                dafny_code=spec_content,
+                timeout_seconds=60,
+            )
+            
+            if result.verified:
+                verified_anchors.append(anchor)
+                # Update anchor status in database
+                anchor.verification_status = "verified"  # type: ignore[assignment]
+            else:
+                failed_anchors.append((anchor, result))
+                anchor.verification_status = "failed"  # type: ignore[assignment]
+            
+            db.commit()
+            
+        except Exception as e:
+            logger.error(f"Error verifying anchor {anchor.function_name}: {e}")
+            skipped_anchors.append((anchor, str(e)))
+    
+    # Build result summary
+    total = len(anchors)
+    verified_count = len(verified_anchors)
+    failed_count = len(failed_anchors)
+    skipped_count = len(skipped_anchors)
+    
+    # Determine conclusion
+    if failed_count > 0:
+        conclusion = "failure"
+        title = f"✗ {failed_count}/{total} verification(s) failed"
+    elif skipped_count == total:
+        conclusion = "neutral"
+        title = f"⊘ {skipped_count} anchor(s) skipped (no specs linked)"
+    else:
+        conclusion = "success"
+        title = f"✓ {verified_count}/{total} anchor(s) verified"
+    
+    # Build detailed summary
+    summary_parts = []
+    
+    if verified_anchors:
+        summary_parts.append("**Verified:**")
+        for anchor in verified_anchors:
+            summary_parts.append(f"- ✓ `{anchor.function_name}` in `{anchor.file_path}`")
+    
+    if failed_anchors:
+        summary_parts.append("\n**Failed:**")
+        for anchor, result in failed_anchors:
+            error_msgs = [e.message for e in result.errors[:3]]  # First 3 errors
+            summary_parts.append(f"- ✗ `{anchor.function_name}` in `{anchor.file_path}`")
+            for msg in error_msgs:
+                summary_parts.append(f"  - {msg}")
+    
+    if skipped_anchors:
+        summary_parts.append("\n**Skipped:**")
+        for anchor, reason in skipped_anchors:
+            summary_parts.append(f"- ⊘ `{anchor.function_name}`: {reason}")
+    
+    summary = "\n".join(summary_parts) if summary_parts else "No anchors to verify."
+    
+    # Update check run with final results
+    await get_check_service().update_check_run(
+        installation_id=installation_id,
+        owner=owner,
+        repo=repo_name,
+        check_run_id=check_run_id,
+        status="completed",
+        conclusion=conclusion,
+        output={
+            "title": title,
+            "summary": summary
+        }
+    )

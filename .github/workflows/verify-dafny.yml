@@ -1,16 +1,17 @@
 name: Verify Dafny Specifications
-# Cache test: Second build to verify cache is working
 
 on:
   push:
     branches: [ main, develop ]
     paths:
       - 'api/verification/**/*.dfy'
+      - 'verifier/**'
       - '.github/workflows/verify-dafny.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'api/verification/**/*.dfy'
+      - 'verifier/**'
       - '.github/workflows/verify-dafny.yml'
   workflow_dispatch:
 
@@ -22,43 +23,91 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch full history for git diff to work
+          fetch-depth: 0
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
-      - name: Debug cache info
-        run: |
-          echo "Current branch: ${{ github.ref }}"
-          echo "Build context files changed:"
-          git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "First commit or no previous commit"
-          echo ""
-          echo "Dockerfile checksum:"
-          sha256sum Dockerfile.api || echo "Dockerfile.api not found"
-          echo "Requirements checksum:"
-          sha256sum requirements.txt api/requirements.txt 2>/dev/null || echo "Requirements files not found"
-      
-      - name: Build and Cache API Image
+      - name: Build Verifier Image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile.api
+          file: ./verifier/Dockerfile
           load: true
           push: false
-          tags: guardian-gateway-api:latest
+          tags: guardian-verifier:latest
           cache-from: |
-            type=gha,scope=global
-            type=gha,scope=refs/heads/main
-            type=gha,scope=${{ github.ref }}
-          cache-to: type=gha,mode=max,scope=global
+            type=gha,scope=verifier-global
+            type=gha,scope=verifier-${{ github.ref }}
+          cache-to: type=gha,mode=max,scope=verifier-global
           outputs: type=docker
         env:
           BUILDKIT_PROGRESS: plain
       
-      - name: Verify Dafny specifications
+      - name: Start Verifier Service
         run: |
-          # Verify all Dafny files in api/verification/
-          docker run --rm -v "${{ github.workspace }}:/app" -w /app guardian-gateway-api:latest bash -c "dafny verify --solver-path=/root/.dotnet/tools/z3/bin/z3-4.12.1 --allow-warnings api/verification/*.dfy"
+          # Start the verifier service in background
+          docker run -d --name verifier \
+            -p 8001:8001 \
+            --tmpfs /tmp:size=100M \
+            guardian-verifier:latest
+          
+          # Wait for service to be ready
+          echo "Waiting for verifier service to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8001/health | grep -q "healthy"; then
+              echo "Verifier service is ready!"
+              break
+            fi
+            echo "Attempt $i/30 - waiting..."
+            sleep 2
+          done
+          
+          # Final health check
+          curl -s http://localhost:8001/health | jq .
+      
+      - name: Verify Dafny Specifications
+        run: |
+          # Verify each Dafny file in api/verification/
+          EXIT_CODE=0
+          
+          for file in api/verification/*.dfy; do
+            echo "=========================================="
+            echo "Verifying: $file"
+            echo "=========================================="
+            
+            # Read file content and send to verifier
+            CONTENT=$(cat "$file" | jq -Rs .)
+            
+            RESPONSE=$(curl -s -X POST http://localhost:8001/verify \
+              -H "Content-Type: application/json" \
+              -d "{\"dafny_code\": $CONTENT, \"timeout_seconds\": 120}")
+            
+            # Check if verified
+            VERIFIED=$(echo "$RESPONSE" | jq -r '.verified')
+            TIME_MS=$(echo "$RESPONSE" | jq -r '.verification_time_ms')
+            
+            if [ "$VERIFIED" = "true" ]; then
+              echo "✓ VERIFIED in ${TIME_MS}ms"
+            else
+              echo "✗ FAILED"
+              echo "Errors:"
+              echo "$RESPONSE" | jq -r '.errors[] | "  Line \(.line): \(.message)"'
+              echo ""
+              echo "Solver output:"
+              echo "$RESPONSE" | jq -r '.solver_output'
+              EXIT_CODE=1
+            fi
+            echo ""
+          done
+          
+          exit $EXIT_CODE
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop verifier 2>/dev/null || true
+          docker rm verifier 2>/dev/null || true
       
       - name: Check verification results
         if: failure()
