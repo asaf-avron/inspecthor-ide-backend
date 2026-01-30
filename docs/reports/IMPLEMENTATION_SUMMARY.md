@@ -42,7 +42,6 @@
 - ✅ Updated `docker-compose.yml` with multi-service setup:
   - `api` service (FastAPI on port 8000)
   - `frontend` service (Next.js on port 3000)
-  - `streamlit` service (legacy, optional with `--profile legacy`)
 - ✅ Created `Dockerfile.api` for backend
 - ✅ Created `frontend/Dockerfile` for frontend
 
@@ -135,7 +134,6 @@ docker-compose up --build
 - **Frontend IDE**: http://localhost:3000
 - **Backend API**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
-- **Legacy Streamlit**: http://localhost:8501 (with `--profile legacy`)
 
 ## Next Steps
 
@@ -151,4 +149,4 @@ docker-compose up --build
 - Templates are ready for immediate use
 - API structure supports the full workflow
 - Docker setup enables easy deployment
-- Legacy Streamlit UI is preserved for reference
+- UI is Next.js IDE only (legacy Streamlit removed)

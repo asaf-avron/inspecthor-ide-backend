@@ -52,7 +52,6 @@ dafny --version
 
 ```bash
 # Install Python dependencies
-pip install -r requirements.txt
 pip install -r api/requirements.txt
 
 # Create .env file with your API key
@@ -128,7 +127,6 @@ guardian-gateway/
 │   ├── models.py              # Pydantic models
 │   └── requirements.txt       # API dependencies
 ├── core_*.py                  # Core Python modules
-├── app.py                     # Legacy Streamlit UI (deprecated)
 ├── docs/                      # Documentation
 └── tests/                     # Test files
 ```
@@ -173,18 +171,6 @@ npm run dev          # Development server
 npm run build        # Production build
 npm run lint         # Run linter
 ```
-
-## Legacy Streamlit UI
-
-The original Streamlit interface is still available but deprecated:
-
-```bash
-streamlit run app.py
-```
-
-Access at http://localhost:8501
-
-**Note**: The Next.js IDE is the recommended interface going forward.
 
 ## Contributing
 

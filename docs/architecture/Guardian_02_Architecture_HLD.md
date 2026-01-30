@@ -33,18 +33,18 @@ The system functions as a unidirectional pipeline with three distinct components
 * **Eyes:** **Gemini 3 Vision**. Compares code against a whiteboard architecture diagram.  
 * **Judge:** **Dafny Compiler**. The mathematical engine that approves or rejects the logic.  
 * **Sandbox:** **Nomad / Docker**. Ephemeral environment to run the code safely.  
-* **UI:** **Streamlit**. Pure Python dashboard for "Mission Control."
+* **UI:** **Streamlit** (deprecated; UI is now Next.js IDE).
 
 ## **3\. Data Flow & API Design**
 
 ### **3.1. The "Ambiguity Hunt" (Auditor Flow)**
 
-* **Input:** User pastes spec.md into Streamlit.  
+* **Input:** User pastes spec.md into Streamlit (deprecated; UI is now Next.js).  
 * **Process:**  
   1. Call Gemini 3 Pro (Config: thinking\_level="high").  
   2. System Prompt: "Extract Nouns (State) and Verbs (Methods). Identify missing preconditions."  
   3. Output: JSON { "code": "...", "gaps": \[...\] }.  
-* **Output:** Streamlit renders "Gap Cards" (Red/Yellow).
+* **Output:** Streamlit renders "Gap Cards" (Red/Yellow) (deprecated; UI is now Next.js).
 
 ### **3.2. The "Verification Loop" (Guardian Flow)**
 
@@ -54,4 +54,4 @@ The system functions as a unidirectional pipeline with three distinct components
      * Channel B: interface.dfy Contracts \-\> Included as Trait.  
   2. **Compilation:** Run dafny verify implementation.dfy.  
   3. **Result:** Capture exit\_code.  
-* **Output:** Streamlit updates status to Green (Signed) or Red (Blocked).
+* **Output:** Streamlit updates status to Green (Signed) or Red (Blocked) (deprecated; UI is now Next.js).
