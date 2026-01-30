@@ -1,5 +1,7 @@
 # **Guardian Gateway: Product Requirements Document (MVP)**
 
+> **Note:** The UI has moved to the Next.js IDE; references to Streamlit in this doc are historical.
+
 ## **1\. User Personas**
 
 * **The "Junior" Agent (Input):** A coding bot (Cursor/Windsurf) that generates Python code and submits PRs.  
