@@ -44,3 +44,5 @@ If it missed any check, the **Real Guardian** (the Dafny Compiler) would throw a
 Once core\_logic.py is written, ask Cursor to write app.py:
 
 "Now write app.py using Flask/Streamlit. It should handle the Database connection (SQL/Redis), fetch the data into a Dict, call our verified send\_kudos function, and then save the result back to the DB."
+
+> **Deprecation note:** The "write app.py using Flask/Streamlit" step is deprecated. The current stack is FastAPI (backend) + Next.js (IDE).

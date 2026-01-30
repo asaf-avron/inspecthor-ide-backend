@@ -1,197 +1,197 @@
 # Guardian Gateway
 
-**Autonomous Infrastructure for Mathematical AI Verification**
+**Backend API for Formal Specification Verification**
 
 ## Overview
 
-Guardian Gateway is a unified proof-driven IDE that enables developers to create formally verified specifications from English requirements. It combines:
+Guardian Gateway is a backend API service that transforms English requirements into formally verified Dafny specifications using Google Gemini AI. The backend is fully Dockerized and includes an isolated verification service with Dafny and Z3 solver—no local installation required.
 
-- **English → Dafny workflow**: Automatic generation of formal specifications from natural language
-- **Real-time verification**: Live proof obligation checking with Dafny
-- **AI-powered debugging**: Gemini-based assistant for resolving verification failures
-- **Modern IDE experience**: Next.js + shadcn/ui components with split-panel layout
+**Note:** The IDE frontend is in a separate repository (`v0-guardian-gateway-ide`). This repository contains only the backend API and verification services.
 
-## Architecture
+## Formally Verified Components
 
-### Frontend (Next.js IDE)
-- **Left Panel**: Markdown editor for English requirements
-- **Center Panel**: Generated Dafny code with syntax highlighting
-- **Right Panel**: Verification results, audit gaps, AI assistant
-- **Bottom Panel**: Terminal with solver output
+This project includes **7 formally verified Dafny specifications** verified in CI:
 
-### Backend (Python + FastAPI)
-- **REST API**: FastAPI server on port 8000
-- **Core Modules**: 
-  - `core_workflow.py`: Triage and structuring
-  - `core_auditor.py`: Spec analysis with Gemini
-  - `core_gateway.py`: Dafny verification
-- **API Documentation**: Automatic Swagger/ReDoc generation
+- **Database Model** - Core data structures and state invariants
+- **File Operations** - Create, update, delete files
+- **Project Management** - Create projects and cascade deletion
+- **Project Migration** - Anonymous → authenticated project migration
+- **Crypto Contract** - Token encryption/decryption (Fernet)
+- **Spec Generation** - LLM-based spec generation (partial)
+- **Traceability** - Traceability link management (partial)
 
-## Quick Start (Recommended)
+See [`docs/formally-verified/`](docs/formally-verified/) for complete documentation. All specifications are verified automatically via Docker-based verification service (`.github/workflows/verify-dafny.yml`).
+
+## Quick Start (Docker - Recommended)
+
+The backend is fully Dockerized. No local Dafny or Z3 installation required.
 
 ### Prerequisites
-- Node.js 18+ and npm
-- Python 3.10+
-- Dafny CLI installed (see installation below)
+- Docker and Docker Compose
 - Google Gemini API key
 
-### 1. Install Dafny
+### Setup
 
 ```bash
-# Windows/Linux (requires .NET SDK 6.0+)
-dotnet tool install --global dafny
+# Clone repository
+git clone <repository-url>
+cd guardian-gateway
 
-# macOS
-brew install dafny
-
-# Verify installation
-dafny --version
-```
-
-### 2. Setup Backend
-
-```bash
-# Install Python dependencies
-pip install -r requirements.txt
-pip install -r api/requirements.txt
-
-# Create .env file with your API key
-echo "GEMINI_API_KEY=your_api_key_here" > .env
-```
-
-### 3. Setup Frontend
-
-```bash
-cd frontend
-npm install
-```
-
-### 4. Run Both Services
-
-**Option A: Using convenience script (Linux/Mac)**
-```bash
-chmod +x dev-all.sh
-./dev-all.sh
-```
-
-**Option B: Using convenience script (Windows)**
-```cmd
-dev-all.bat
-```
-
-**Option C: Manual (two terminals)**
-
-Terminal 1 - Backend:
-```bash
-python -m api.main
-```
-
-Terminal 2 - Frontend:
-```bash
-cd frontend
-npm run dev
-```
-
-### 5. Access the IDE
-
-- **IDE**: http://localhost:3000
-- **API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-
-## Quick Start (Docker)
-
-```bash
 # Create .env file
-echo "GEMINI_API_KEY=your_api_key_here" > .env
+cp .env.example .env
+# Edit .env and add: GEMINI_API_KEY=your_api_key_here
 
-# Build and run
+# Build and run all services (API + Verifier + Database)
 docker-compose up --build
 
 # Access
-# - IDE: http://localhost:3000
 # - API: http://localhost:8000
+# - API Docs: http://localhost:8000/docs
+# - Verifier: http://localhost:8001 (internal only)
 ```
+
+The Docker setup includes:
+- **API Service** (`api/`) - FastAPI backend on port 8000
+- **Verifier Service** (`verifier/`) - Isolated Dafny/Z3 verification service on port 8001
+- **PostgreSQL Database** - Optional (defaults to SQLite)
+
+### Development Mode
+
+```bash
+# Run backend API locally (still uses Docker verifier)
+python -m api.main
+
+# Or use convenience script
+./dev-backend.sh
+```
+
+**Note:** Even in local development, the verification service runs in Docker—no local Dafny/Z3 installation needed.
 
 ## Project Structure
 
 ```
 guardian-gateway/
-├── frontend/                  # Next.js IDE
-│   ├── app/                   # Next.js pages
-│   ├── components/            # React components
-│   │   ├── ide/               # IDE-specific components
-│   │   └── ui/                # UI primitives
-│   ├── lib/                   # Utilities and API client
-│   └── public/templates/      # Specification templates
 ├── api/                       # FastAPI backend
-│   ├── main.py                # API entry point
-│   ├── models.py              # Pydantic models
-│   └── requirements.txt       # API dependencies
-├── core_*.py                  # Core Python modules
-├── app.py                     # Legacy Streamlit UI (deprecated)
-├── docs/                      # Documentation
-└── tests/                     # Test files
+│   ├── main.py               # API entry point
+│   ├── core/                 # Core business logic
+│   │   ├── models.py         # Database models (verified)
+│   │   ├── file_operations.py # File ops (verified)
+│   │   ├── project_management.py # Project ops (verified)
+│   │   └── migration.py      # Migration (verified)
+│   ├── services/             # Service layer
+│   ├── verification/         # Dafny specifications (.dfy)
+│   │   ├── models.dfy
+│   │   ├── file_operations.dfy
+│   │   ├── project_management.dfy
+│   │   ├── project_migration.dfy
+│   │   ├── crypto_contract.dfy
+│   │   ├── spec_generation.dfy
+│   │   └── traceability.dfy
+│   └── requirements.txt
+├── core/                     # Core modules (not verified)
+│   ├── workflow.py          # Triage and structuring
+│   ├── auditor.py            # Spec analysis with Gemini
+│   ├── gateway.py            # Dafny verification interface
+│   └── security/
+│       └── crypto.py         # Crypto ops (verified)
+├── verifier/                 # Verification service (Docker)
+│   ├── Dockerfile            # Includes Dafny + Z3
+│   ├── main.py               # FastAPI verifier service
+│   └── runner.py             # Dafny execution
+├── docs/                     # Documentation
+│   ├── formally-verified/    # Verified component docs
+│   ├── ARCHITECTURE.md       # System architecture
+│   └── SECURITY.md           # Security practices
+├── tests/                    # Test suite
+├── scripts/                  # Utility scripts
+├── docker-compose.yml        # Docker orchestration
+└── Dockerfile.api            # API service Dockerfile
 ```
+
+## Architecture
+
+### Backend (Python + FastAPI)
+- **REST API**: FastAPI server on port 8000
+- **Core Modules**: 
+  - `core/workflow.py`: Triage and structuring
+  - `core/auditor.py`: Spec analysis with Gemini
+  - `core/gateway.py`: Dafny verification interface
+- **API Documentation**: Automatic Swagger/ReDoc generation
+
+### Verification Service (Docker)
+- **Isolated Container**: Dafny and Z3 solver pre-installed
+- **No Local Installation**: All verification runs in Docker
+- **Network Isolation**: Verifier only accessible internally
+- **Stateless**: No credentials, no database access
+
+### Database
+- **SQLite** (default): File-based, no setup required
+- **PostgreSQL** (optional): Configure via `DATABASE_URL` in docker-compose.yml
 
 ## Features
 
-### Phase 1 (Current)
-- ✅ Empty state with template gallery
-- ✅ Markdown editor for requirements
-- ✅ File management (browser storage)
-- ✅ Specification generation (English → Dafny)
-- ✅ Gap analysis and traceability matrix
-- ✅ AI assistant chat interface
-- 🔖 GitHub integration placeholders
+### Formally Verified (Dafny)
+- ✅ Database model with relational integrity invariants
+- ✅ File operations (create, update, delete)
+- ✅ Project management with cascade deletion
+- ✅ Anonymous → authenticated project migration
+- ✅ Cryptographic token encryption/decryption
 
-### Phase 2 (Planned)
-- GitHub OAuth login
-- Create PR with contract files
-- Repository sync
-- File management via GitHub API
+### Not Formally Verified
+- API endpoints and routing
+- GitHub integration
+- LLM-based spec generation (partial spec exists)
+- Traceability links (partial spec exists)
+- Frontend IDE (separate repository)
 
-### Phase 3 (Future)
-- GitHub App for CI/CD
-- Automated PR verification
-- Bot comments with proof results
+## API Endpoints
 
-## Development
-
-### Backend API Endpoints
-
-- `GET /api/health` - Health check
-- `POST /api/generate/spec` - Generate Dafny from English
-- `POST /api/assistant/chat` - AI debugging assistant
+- `GET /api/health` - Health check (public)
+- `POST /api/generate/spec` - Generate Dafny from English (authenticated)
+- `POST /api/assistant/chat` - AI debugging assistant (authenticated)
 
 See full API documentation at http://localhost:8000/docs
 
-### Frontend Development
+## Development
+
+### Running Tests
 
 ```bash
-cd frontend
-npm run dev          # Development server
-npm run build        # Production build
-npm run lint         # Run linter
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_files.py
 ```
 
-## Legacy Streamlit UI
-
-The original Streamlit interface is still available but deprecated:
+### Verifying Dafny Specs
 
 ```bash
-streamlit run app.py
+# Verify all specs (uses Docker verifier)
+./scripts/verify_dafny.sh api/verification/models.dfy api/verification/file_operations.dfy
+
+# Or verify via Docker directly
+docker-compose exec verifier dafny verify api/verification/models.dfy
 ```
 
-Access at http://localhost:8501
+### Code Structure
 
-**Note**: The Next.js IDE is the recommended interface going forward.
+- **Formally Verified**: `api/core/models.py`, `api/core/file_operations.py`, `api/core/project_management.py`, `api/core/migration.py`, `core/security/crypto.py`
+- **Not Verified**: All other Python modules (API routes, services, GitHub integration, etc.)
+
+## Documentation
+
+- **[Formally Verified Components](docs/formally-verified/)** - Dafny-verified specifications
+- **[Architecture](docs/ARCHITECTURE.md)** - System design and API contracts
+- **[Security](docs/SECURITY.md)** - Security practices and deployment
+- **[Complete Docs Index](docs/README.md)** - Full documentation structure
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Run tests
+4. Run tests and verify Dafny specs
 5. Submit a pull request
 
 ## License
@@ -200,6 +200,6 @@ Access at http://localhost:8501
 
 ## Support
 
-- Documentation: `/docs`
-- Issues: GitHub Issues
-- Templates: `/frontend/public/templates`
+- **Documentation**: [`docs/`](docs/)
+- **Issues**: GitHub Issues
+- **API Docs**: http://localhost:8000/docs (when running)

@@ -1,5 +1,7 @@
 # **Feature Spec: Guardian Gateway (The Compiler)**
 
+> **Note:** The UI has moved to the Next.js IDE; the "Imperative Shell (Streamlit)" section is historical.
+
 ## **1\. The Logic Model**
 
 The Gateway is the "CI/CD Firewall." It proves that the implementation matches the design.

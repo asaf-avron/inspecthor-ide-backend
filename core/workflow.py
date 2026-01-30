@@ -1,6 +1,6 @@
 # Guardian Gateway - Core Workflow
 # State machine for the 4-stage specification workflow
-# Functional Core: No Streamlit imports allowed
+# Functional Core: No UI framework imports in core
 
 """
 The Workflow Engine: Manages the Triage -> Structure -> Audit -> Approve pipeline.

@@ -1,6 +1,6 @@
 # Guardian Gateway - Core Parser
 # Pure Python logic for parsing Dafny contracts
-# Functional Core: No Streamlit imports allowed
+# Functional Core: No UI framework imports in core
 
 """
 The Dafny Parser: Extracts method contracts from Dafny source code.
