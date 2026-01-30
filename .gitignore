@@ -41,3 +41,14 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets and private keys
+github-app-private-key.pem
+*.pem
+*.key
+
+# Accidental files (redirect output mistakes)
+=*
+
+# Patch files (temporary development files)
+*.patch
