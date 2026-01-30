@@ -415,8 +415,17 @@ Filename:"""
             # Verify project ownership
             api_key_hash_value = hash_api_key(api_key) if api_key else None
             owner_filter = get_project_owner_filter(self.current_user, api_key_hash_value)
+            
+            # Convert UUID strings to objects
+            try:
+                project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+                source_file_id_uuid = uuid.UUID(source_file_id) if isinstance(source_file_id, str) else source_file_id
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid UUID format: project_id={project_id}, source_file_id={source_file_id}")
+                return None, None
+            
             project = self.db.query(DBProject).filter(
-                DBProject.project_id == project_id,
+                DBProject.project_id == project_id_uuid,
                 owner_filter
             ).first()
             
@@ -426,8 +435,8 @@ Filename:"""
             
             # Load source file
             source_file = self.db.query(DBFile).filter(
-                DBFile.file_id == source_file_id,
-                DBFile.project_id == project_id
+                DBFile.file_id == source_file_id_uuid,
+                DBFile.project_id == project_id_uuid
             ).first()
             
             if not source_file or source_file.file_type != 'md':
@@ -495,9 +504,10 @@ Filename:"""
 """
                         
                         # Save unit markdown file
-                        unit_file_id = str(uuid.uuid4())
+                        unit_file_uuid = uuid.uuid4()
+                        unit_file_id = str(unit_file_uuid)
                         unit_file = DBFile(
-                            file_id=unit_file_id,
+                            file_id=unit_file_uuid,
                             project_id=source_file.project_id,
                             filename=unit_filename,
                             content=unit_markdown,
@@ -507,9 +517,10 @@ Filename:"""
                         self.db.add(unit_file)
                         
                         # Save Dafny file
-                        dafny_file_id = str(uuid.uuid4())
+                        dafny_file_uuid = uuid.uuid4()
+                        dafny_file_id = str(dafny_file_uuid)
                         dafny_file = DBFile(
-                            file_id=dafny_file_id,
+                            file_id=dafny_file_uuid,
                             project_id=source_file.project_id,
                             filename=dafny_filename,
                             content=dafny_code,
@@ -519,12 +530,12 @@ Filename:"""
                         self.db.add(dafny_file)
                         
                         # Create unit link
-                        link_id = str(uuid.uuid4())
+                        link_uuid = uuid.uuid4()
                         unit_link = DBUnitLink(
-                            link_id=link_id,
+                            link_id=link_uuid,
                             root_file_id=source_file.file_id,
-                            unit_file_id=unit_file_id,
-                            dafny_file_id=dafny_file_id,
+                            unit_file_id=unit_file_uuid,
+                            dafny_file_id=dafny_file_uuid,
                             start_line=candidate.line_range[0],
                             end_line=candidate.line_range[1],
                             title=candidate.title,
@@ -583,7 +594,7 @@ Filename:"""
                 id=entry.id,
                 source_text=entry.source_text,
                 code_line=entry.code_line,
-                line_number=None,
+                line_number=entry.line_number,
                 status=cast(Literal["mapped", "partial", "missing"], entry.status if entry.status in ["mapped", "partial", "missing"] else "mapped"),
                 confidence=0.9
             ))

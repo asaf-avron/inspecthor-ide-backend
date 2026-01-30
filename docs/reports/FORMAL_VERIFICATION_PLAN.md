@@ -74,7 +74,7 @@ Runtime Verification
 
 ### Boundary Mapping
 
-From `UI_API_MAPPING.md`, the **Functional Core** includes:
+From `development/UI_API_MAPPING.md`, the **Functional Core** includes:
 
 | Component | Core Logic | Shell Logic |
 |-----------|-----------|-------------|
@@ -750,4 +750,4 @@ To complete the formal verification specifications, the experts need:
 - InspecThor Architecture Diagram (Spec-First Synthesis Loop)
 - Dafny Documentation: https://dafny.org/dafny/DafnyRef/DafnyRef
 - icontracts: https://github.com/Parquery/icontract
-- Guardian Gateway: `docs/UI_API_MAPPING.md`
+- Guardian Gateway: `docs/development/UI_API_MAPPING.md`

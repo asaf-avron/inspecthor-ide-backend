@@ -439,16 +439,19 @@ async def get_file_traceability(
     api_key_hash_value = hash_api_key(api_key)
     
     # Verify file exists and ownership
-    source_file = db.query(DBFile).filter(
-        DBFile.file_id == file_id
-    ).first()
+    try:
+        source_file = db.query(DBFile).filter(
+            DBFile.file_id == uuid.UUID(file_id)
+        ).first()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid file ID format")
     
     if not source_file:
         raise HTTPException(status_code=404, detail="File not found")
     
     # Query unit links
     unit_links = db.query(DBUnitLink).filter(
-        DBUnitLink.root_file_id == file_id
+        DBUnitLink.root_file_id == uuid.UUID(file_id)
     ).all()
     
     # Format response
