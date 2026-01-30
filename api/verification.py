@@ -1,6 +1,9 @@
 """
 Verification endpoint for Dafny code
-Wraps Dafny CLI and parses verification results
+
+This module provides the /api/verify endpoint that delegates verification
+to the isolated Verifier Service. For local development without Docker,
+it falls back to direct Dafny CLI execution.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -10,6 +13,7 @@ import os
 import re
 from typing import List, Optional, Literal, cast
 import time
+import logging
 
 from api.models import (
     VerifyRequest,
@@ -18,8 +22,14 @@ from api.models import (
     VerificationError,
     GapLocation
 )
+from api.services.verifier_client import VerifierClient, is_verifier_available
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["verification"])
+
+# Configuration
+USE_VERIFIER_SERVICE = os.getenv("USE_VERIFIER_SERVICE", "true").lower() == "true"
 
 
 def parse_dafny_output(output: str, return_code: int) -> tuple[bool, List[VerificationResult], List[VerificationError]]:
@@ -111,19 +121,96 @@ async def verify_dafny(request: VerifyRequest):
     """
     Verify Dafny code and return detailed verification results.
     
-    Runs Dafny CLI with the provided code and returns:
+    This endpoint delegates to the isolated Verifier Service when available.
+    Falls back to local Dafny CLI for development environments.
+    
+    Returns:
     - Verification status
     - Detailed results per method/function
     - Errors with locations
     - Proof obligations
     - Solver output
     """
+    # Try verifier service first (preferred in production)
+    if USE_VERIFIER_SERVICE:
+        try:
+            if await is_verifier_available():
+                return await verify_via_service(request)
+            else:
+                logger.info("Verifier service not available, falling back to local Dafny")
+        except Exception as e:
+            logger.warning(f"Verifier service error, falling back to local: {e}")
+    
+    # Fall back to local Dafny CLI
+    return await verify_local(request)
+
+
+async def verify_via_service(request: VerifyRequest) -> VerifyResponse:
+    """
+    Verify via the isolated Verifier Service.
+    
+    This is the preferred path in production - the verifier runs in
+    an isolated container with no credentials.
+    """
+    client = VerifierClient()
+    
+    try:
+        result = await client.verify(
+            dafny_code=request.dafny_code,
+            timeout_seconds=request.timeout_seconds,
+            solver=request.solver,
+        )
+        
+        # Convert verifier client result to API response format
+        return VerifyResponse(
+            verified=result.verified,
+            verification_time_ms=result.verification_time_ms,
+            results=[
+                VerificationResult(
+                    type=cast(Literal["method", "function", "invariant"], r.type if r.type in ["method", "function"] else "method"),
+                    name=r.name,
+                    location=GapLocation(line=r.line, column=None, file=None),
+                    status=cast(Literal["verified", "failed", "timeout"], r.status),
+                    message=r.message,
+                    proof_obligations=[]
+                )
+                for r in result.results
+            ],
+            errors=[
+                VerificationError(
+                    type=cast(Literal["syntax", "type", "verification"], e.type),
+                    line=e.line,
+                    column=e.column,
+                    message=e.message,
+                    suggestion=e.suggestion
+                )
+                for e in result.errors
+            ],
+            warnings=[{"message": w} for w in result.warnings],
+            solver_output=result.solver_output
+        )
+        
+    except Exception as e:
+        logger.error(f"Verifier service request failed: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Verifier service error: {str(e)}"
+        )
+
+
+async def verify_local(request: VerifyRequest) -> VerifyResponse:
+    """
+    Verify using local Dafny CLI.
+    
+    This is the fallback path for development environments
+    where the verifier service is not running.
+    """
     # Check if Dafny is available
     import shutil
     if not shutil.which("dafny"):
         raise HTTPException(
             status_code=503,
-            detail="Dafny verifier not available. Please install Dafny CLI."
+            detail="Dafny verifier not available. Please install Dafny CLI or start the verifier service."
         )
     
     # Create temporary file for Dafny code
@@ -137,7 +224,6 @@ async def verify_dafny(request: VerifyRequest):
             "dafny",
             "verify",
             temp_file,
-            f"--solver:{request.solver}",
             f"--verification-time-limit:{request.timeout_seconds}"
         ]
         

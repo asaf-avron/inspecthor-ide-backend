@@ -9,6 +9,7 @@ Uses Google Gemini to perform semantic analysis and generate Dafny skeletons.
 
 import os
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -52,6 +53,7 @@ class TraceabilityEntry:
     source_text: str
     status: str = "Pending"  # Pending | Implemented | Verified | Missing | Obsolete
     code_line: str = ""
+    line_number: Optional[int] = None
 
 
 @dataclass
@@ -111,7 +113,7 @@ For each atomic requirement:
 3. **Missing Preconditions/Postconditions**: What should be guaranteed before and after operations
 
 ## OUTPUT FORMAT:
-You MUST return ONLY valid JSON with this exact schema (no markdown, no explanation):
+You MUST return ONLY valid JSON with this exact schema (no markdown, no explanation, no HTML tags, no syntax highlighting):
 {
   "gaps": [
     {"severity": "critical", "description": "Description of the gap"},
@@ -128,6 +130,11 @@ You MUST return ONLY valid JSON with this exact schema (no markdown, no explanat
   ],
   "dafny_skeleton": "trait SpecName {\\n  // [REF-01] comment\\n  // Dafny code here\\n}"
 }
+
+## CRITICAL OUTPUT RULES:
+- Return PLAIN JSON ONLY - no markdown code blocks, no HTML tags, no syntax highlighting
+- All string values must be PLAIN TEXT - do not wrap code in <span>, <div>, or any HTML elements
+- The dafny_skeleton field must contain PLAIN Dafny code with no HTML formatting
 
 ## RULES:
 - severity must be either "critical" or "warning"
@@ -188,8 +195,8 @@ class SpecAuditor:
     Postconditions: Returns a GapReport with analysis results or error.
     """
     
-    DEFAULT_MODEL = "models/gemini-2.0-flash-exp"
-    FALLBACK_MODEL = "models/gemini-2.5-flash"
+    DEFAULT_MODEL = "gemini-2.0-flash-001"
+    FALLBACK_MODEL = "gemini-2.0-flash-001"
     
     def __init__(self, api_key: Optional[str] = None):
         """
@@ -323,20 +330,53 @@ class SpecAuditor:
             dafny_skeleton = data.get("dafny_skeleton", "")
             if isinstance(dafny_skeleton, str):
                 dafny_skeleton = dafny_skeleton.replace("\\n", "\n")
+                # Strip any HTML tags and fragments that may have leaked from LLM output
+                # Strategy: Attributes first, then orphaned tags, then cleanup
+                
+                # 0. Log original for debugging
+                print(f"DEBUG: Original Dafny Skeleton (first 100 chars): {dafny_skeleton[:100]!r}")
+                
+                # 1. Remove attributes first (class="...", style="...")
+                dafny_skeleton = re.sub(r'\b[a-z-]+="[^"]*"', '', dafny_skeleton)
+                
+                # 2. Remove orphaned tag endings like "text-syntax-keyword">
+                dafny_skeleton = re.sub(r'"[^"]*">', '', dafny_skeleton)
+                
+                # 3. Remove standard HTML tags
+                dafny_skeleton = re.sub(r'<[^>]*>', '', dafny_skeleton)
+                
+                # 4. Remove any remaining angle brackets
+                dafny_skeleton = re.sub(r'[<>]', '', dafny_skeleton)
+                
+                print(f"DEBUG: Cleaned Dafny Skeleton (first 100 chars): {dafny_skeleton[:100]!r}")
             
             # Extract tagged spec and unescape newlines
             tagged_spec = data.get("tagged_spec", "")
             if isinstance(tagged_spec, str):
                 tagged_spec = tagged_spec.replace("\\n", "\n")
             
+            # Create line number map by scanning Dafny skeleton
+            ref_line_map = {}
+            if isinstance(dafny_skeleton, str):
+                for i, line in enumerate(dafny_skeleton.split('\n')):
+                    # Use regex to find ANY [REF-XX] tags in the line
+                    matches = re.findall(r'\[(REF-[\w-]+)\]', line)
+                    for match in matches:
+                         if match not in ref_line_map:
+                             ref_line_map[match] = i + 1
+
             # Extract traceability matrix
             traceability_matrix = []
             for entry_data in data.get("traceability_matrix", []):
+                ref_id = entry_data.get("id", "")
+                actual_line = ref_line_map.get(ref_id)
+                
                 traceability_matrix.append(TraceabilityEntry(
-                    id=entry_data.get("id", ""),
+                    id=ref_id,
                     source_text=entry_data.get("source_text", ""),
                     status=entry_data.get("status", "Pending"),
-                    code_line=entry_data.get("code_line", "")
+                    code_line=entry_data.get("code_line", ""),
+                    line_number=actual_line
                 ))
             
             return GapReport(

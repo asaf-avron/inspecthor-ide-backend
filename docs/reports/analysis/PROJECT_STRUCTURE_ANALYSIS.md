@@ -142,9 +142,9 @@ guardian-gateway/
 │   ├── templates/
 │   │   ├── Guardian_07_Spec_Template.md
 │   │   └── Template_Architects_Canvas.md
-│   ├── UI_API_MAPPING.md (554 lines)
-│   ├── UI_BACKEND_INTEGRATION_PLAN.md (350 lines)
-│   ├── VERIFICATION_STATUS.md
+│   ├── development/UI_API_MAPPING.md (554 lines)
+│   ├── development/UI_BACKEND_INTEGRATION_PLAN.md (350 lines)
+│   ├── reports/verification/VERIFICATION_STATUS.md
 │   └── Z3_AND_TESTING_FIXES.md
 ├── frontend/
 │   └── app/

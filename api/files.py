@@ -136,6 +136,14 @@ async def save_file(
         db=db
     )
     
+    # SHELL VALIDATION: Check project exists before calling Core
+    # This prevents icontract ViolationError and provides proper HTTP error
+    if request.project_id not in state.projects:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project {request.project_id} not found or not owned by you"
+        )
+    
     # 2. CORE: Generate UUID and call pure logic
     new_file_id = str(uuid.uuid4())
     
@@ -334,6 +342,14 @@ async def update_file(
         db=db
     )
     
+    # SHELL VALIDATION: Check project ownership before calling Core
+    project_id_str = str(db_file.project_id)
+    if project_id_str not in state.projects:
+        raise HTTPException(
+            status_code=403,
+            detail="File belongs to a project you don't own"
+        )
+    
     # 2. CORE: Call pure logic
     new_filename = request.filename if request.filename else ""
     new_state, result = file_operations.update_file_core(
@@ -420,6 +436,14 @@ async def delete_file(
         owner_filter=owner_filter,
         db=db
     )
+    
+    # SHELL VALIDATION: Check project ownership before calling Core
+    project_id_str = str(db_file.project_id)
+    if project_id_str not in state.projects:
+        raise HTTPException(
+            status_code=403,
+            detail="File belongs to a project you don't own"
+        )
     
     # 2. CORE: Call pure logic
     new_state, result = file_operations.delete_file_core(

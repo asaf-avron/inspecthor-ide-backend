@@ -35,7 +35,7 @@ We have updated our formal verification plan to align with the **InspecThor Spec
 | `FORMAL_VERIFICATION_PLAN.md` | ✅ Rewritten | Spec-First architecture plan with optimizations |
 | `EXPERT_REQUIREMENTS.md` | ✅ Created | Lists sources needed by experts |
 | `SAMPLE_SPECS_FOR_EXPERTS.md` | ✅ Created | Example specs for Clover Loop demo |
-| `UI_API_MAPPING.md` | ✅ Existing | API functionality mapping |
+| `development/UI_API_MAPPING.md` | ✅ Existing | API functionality mapping |
 | `VERIFICATION_STATUS.md` | ✅ This file | Status summary |
 
 ---
@@ -233,5 +233,5 @@ We have updated our formal verification plan to align with the **InspecThor Spec
 - **Updated Plan:** `docs/FORMAL_VERIFICATION_PLAN.md`
 - **Expert Requirements:** `docs/EXPERT_REQUIREMENTS.md`
 - **Sample Specs:** `docs/SAMPLE_SPECS_FOR_EXPERTS.md`
-- **API Mapping:** `docs/UI_API_MAPPING.md`
+- **API Mapping:** `docs/development/UI_API_MAPPING.md`
 - **Architecture:** `docs/architecture/Guardian_02_Architecture_HLD.md`

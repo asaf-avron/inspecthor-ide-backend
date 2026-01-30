@@ -9,7 +9,7 @@ This document lists the sources and information needed by the InspecThor experts
 | Source | Status | Location | Purpose |
 |--------|--------|----------|---------|
 | Database Models | ✅ Available | `api/database.py` | Map SQLAlchemy → Dafny types |
-| UI API Mapping | ✅ Available | `docs/UI_API_MAPPING.md` | Identify Core vs Shell |
+| UI API Mapping | ✅ Available | `docs/development/UI_API_MAPPING.md` | Identify Core vs Shell |
 | File Operations | ✅ Available | `api/files.py` | Current Python logic |
 | Project Management | ✅ Available | `api/projects.py` | Current Python logic |
 | Unit Identification | ✅ Available | `api/deconstruct.py` | Unit creation logic |
@@ -57,7 +57,7 @@ File:
 ## 2. UI API Mapping (`docs/UI_API_MAPPING.md`)
 
 **Status:** ✅ Available  
-**Location:** `C:\private-dev\guardian-gateway\docs\UI_API_MAPPING.md`
+**Location:** `C:\private-dev\guardian-gateway\docs\development\UI_API_MAPPING.md`
 
 **Key Information:**
 - All API endpoints and their functionality
@@ -189,7 +189,7 @@ To enable experts to build the formal verification specifications, provide:
 
 ### Package 1: Core Sources (Immediate)
 1. ✅ `api/database.py` - Database models
-2. ✅ `docs/UI_API_MAPPING.md` - API mapping
+2. ✅ `docs/development/UI_API_MAPPING.md` - API mapping
 3. ✅ `api/files.py` - File operations
 4. ✅ `api/projects.py` - Project management
 
@@ -254,7 +254,7 @@ After providing sources, we should ask:
 ## File Checklist
 
 - [x] `api/database.py` - Available
-- [x] `docs/UI_API_MAPPING.md` - Available  
+- [x] `docs/development/UI_API_MAPPING.md` - Available  
 - [x] `api/files.py` - Available
 - [x] `api/projects.py` - Available
 - [x] `api/deconstruct.py` - Available

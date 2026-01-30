@@ -1,11 +1,45 @@
 # Guardian Gateway - Backend Docker Compose
-# Includes: Backend API, PostgreSQL Database
+# Includes: Backend API, PostgreSQL Database, Dafny Verifier
 # Frontend runs locally via: cd ../v0-guardian-gateway-ide && pnpm run dev
 # Run with: docker-compose up --build
 
 version: '3.8'
 
 services:
+  # Dafny Verification Service (Isolated, Stateless)
+  # SECURITY: No credentials, no database access, network isolated
+  verifier:
+    build:
+      context: .
+      dockerfile: verifier/Dockerfile
+    image: guardian-verifier:latest
+    container_name: guardian-verifier
+    ports:
+      - "127.0.0.1:8001:8001"  # Internal only - not exposed to internet
+    networks:
+      - internal
+    # SECURITY: No environment variables with credentials
+    # SECURITY: No volumes mounting secrets or host filesystem
+    # SECURITY: Read-only root filesystem
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M  # Temp files for Dafny verification
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+
   # PostgreSQL Database
   db:
     image: postgres:16-alpine
@@ -38,6 +72,9 @@ services:
       # Database connection
       # Use SQLite for persistence (or PostgreSQL: postgresql://guardian:${DB_PASSWORD:-guardian_dev_password}@db:5432/guardian_gateway)
       DATABASE_URL: ${DATABASE_URL:-sqlite:///./guardian_gateway.db}
+      
+      # Persist data across restarts (set to true to reset on restart)
+      DROP_EXISTING_TABLES: ${DROP_EXISTING_TABLES:-false}
 
       # API Configuration
       GEMINI_API_KEY: ${GEMINI_API_KEY}
@@ -63,12 +100,20 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_OAUTH_REDIRECT_URI: ${GITHUB_OAUTH_REDIRECT_URI:-http://localhost:3000/auth/github/callback}
       USE_MOCK_GITHUB: ${USE_MOCK_GITHUB:-false}
+
+      # Verifier Service URL (internal Docker network)
+      VERIFIER_URL: ${VERIFIER_URL:-http://verifier:8001}
+    networks:
+      - internal
+      - default
     volumes:
       - .:/app
       # Explicit SQLite database persistence - ensures database file persists across container restarts
       - ./guardian_gateway.db:/app/guardian_gateway.db
     depends_on:
       db:
+        condition: service_healthy
+      verifier:
         condition: service_healthy
     restart: unless-stopped
 
@@ -93,6 +138,16 @@ services:
   #   depends_on:
   #     - api
   #   restart: unless-stopped
+
+networks:
+  internal:
+    # Internal network for service-to-service communication
+    # Verifier is isolated to this network only
+    driver: bridge
+    internal: true  # No external access
+  default:
+    # Default network with external access
+    driver: bridge
 
 volumes:
   postgres_data:
