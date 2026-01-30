@@ -1,16 +1,17 @@
 name: Verify Dafny Specifications
-# Cache test: Second build to verify cache is working
 
 on:
   push:
     branches: [ main, develop ]
     paths:
       - 'api/verification/**/*.dfy'
+      - 'verifier/**'
       - '.github/workflows/verify-dafny.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'api/verification/**/*.dfy'
+      - 'verifier/**'
       - '.github/workflows/verify-dafny.yml'
   workflow_dispatch:
 
@@ -21,34 +22,137 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
-      - name: Debug cache info
-        run: |
-          echo "Current branch: ${{ github.ref }}"
-          echo "Build context files changed:"
-          git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "First commit or no previous commit"
-      
-      - name: Build and Cache API Image
+      - name: Build Verifier Image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile.api
+          file: ./verifier/Dockerfile
           load: true
           push: false
-          tags: guardian-gateway-api:latest
+          tags: guardian-verifier:latest
           cache-from: |
-            type=gha,scope=global
-            type=gha,scope=refs/heads/main
-            type=gha,scope=${{ github.ref }}
-          cache-to: type=gha,mode=max,scope=global
+            type=gha,scope=verifier-global
+            type=gha,scope=verifier-${{ github.ref }}
+          cache-to: type=gha,mode=max,scope=verifier-global
+          outputs: type=docker
+        env:
+          BUILDKIT_PROGRESS: plain
       
-      - name: Verify Dafny specifications
+      - name: Start Verifier Service
         run: |
-          # Verify all Dafny files in api/verification/
-          docker run --rm -v "${{ github.workspace }}:/app" -w /app guardian-gateway-api:latest bash -c "dafny verify --solver-path=/root/.dotnet/tools/z3/bin/z3-4.12.1 --allow-warnings api/verification/*.dfy"
+          # Start the verifier service in background
+          docker run -d --name verifier \
+            -p 8001:8001 \
+            --tmpfs /tmp:size=100M \
+            guardian-verifier:latest
+          
+          # Wait for service to be ready
+          echo "Waiting for verifier service to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8001/health | grep -q "healthy"; then
+              echo "Verifier service is ready!"
+              break
+            fi
+            echo "Attempt $i/30 - waiting..."
+            sleep 2
+          done
+          
+          # Final health check
+          curl -s http://localhost:8001/health | jq .
+      
+      - name: Verify Dafny Specifications
+        run: |
+          # Dafny files are organized in groups based on dependencies:
+          # 1. Standalone files (no imports)
+          # 2. Files that import DatabaseModel from models.dfy
+          
+          EXIT_CODE=0
+          
+          # Helper function to verify a file or group of files
+          verify_files() {
+            local description="$1"
+            shift
+            local files=("$@")
+            
+            echo "=========================================="
+            echo "Verifying: $description"
+            echo "=========================================="
+            
+            # Concatenate all files into a single payload
+            COMBINED_CONTENT=""
+            for file in "${files[@]}"; do
+              if [ -f "$file" ]; then
+                COMBINED_CONTENT+="$(cat "$file")"$'\n\n'
+              fi
+            done
+            
+            # Send to verifier
+            CONTENT=$(echo "$COMBINED_CONTENT" | jq -Rs .)
+            RESPONSE=$(curl -s -X POST http://localhost:8001/verify \
+              -H "Content-Type: application/json" \
+              -d "{\"dafny_code\": $CONTENT, \"timeout_seconds\": 180}")
+            
+            # Check if verified
+            VERIFIED=$(echo "$RESPONSE" | jq -r '.verified')
+            TIME_MS=$(echo "$RESPONSE" | jq -r '.verification_time_ms')
+            
+            if [ "$VERIFIED" = "true" ]; then
+              echo "✓ VERIFIED in ${TIME_MS}ms"
+              return 0
+            else
+              echo "✗ FAILED"
+              echo "Errors:"
+              echo "$RESPONSE" | jq -r '.errors[] | "  Line \(.line): \(.message)"' 2>/dev/null || echo "  (error parsing response)"
+              echo ""
+              echo "Solver output:"
+              echo "$RESPONSE" | jq -r '.solver_output'
+              return 1
+            fi
+          }
+          
+          # Group 1: Standalone files (no module imports)
+          echo ""
+          echo "=== Group 1: Standalone specifications ==="
+          echo ""
+          
+          # models.dfy - the base module
+          verify_files "models.dfy (DatabaseModel)" api/verification/models.dfy || EXIT_CODE=1
+          echo ""
+          
+          # crypto_contract.dfy - standalone, no imports
+          verify_files "crypto_contract.dfy (Crypto)" api/verification/crypto_contract.dfy || EXIT_CODE=1
+          echo ""
+          
+          # Group 2: Files that depend on DatabaseModel
+          echo ""
+          echo "=== Group 2: Specifications with DatabaseModel dependency ==="
+          echo ""
+          
+          # Verify each dependent file WITH models.dfy
+          for file in api/verification/file_operations.dfy \
+                      api/verification/project_management.dfy \
+                      api/verification/project_migration.dfy \
+                      api/verification/spec_generation.dfy \
+                      api/verification/traceability.dfy; do
+            if [ -f "$file" ]; then
+              verify_files "$(basename $file) + models.dfy" api/verification/models.dfy "$file" || EXIT_CODE=1
+              echo ""
+            fi
+          done
+          
+          exit $EXIT_CODE
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop verifier 2>/dev/null || true
+          docker rm verifier 2>/dev/null || true
       
       - name: Check verification results
         if: failure()

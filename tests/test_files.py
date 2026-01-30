@@ -1,268 +1,420 @@
 """
-Integration tests for File Management API endpoints
-Tests the full HTTP stack to catch import errors, missing dependencies, etc.
+Tests for file operations endpoints.
+
+These tests cover the file CRUD operations including:
+- Save file (create)
+- Get file (read)
+- List files
+- Update file
+- Delete file
+
+Special focus on error cases that were previously missed:
+- Saving to non-existent project
+- Saving to project owned by another user
+- Operating on files in projects you don't own
 """
 
 import pytest
 from fastapi.testclient import TestClient
 import uuid
 
-
-def test_save_file_endpoint(client, headers, db_session):
-    """Test saving a file - catches import errors and basic functionality"""
-    # First create a project
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Test Project", "description": "Test"},
-        headers=headers
-    )
-    assert project_response.status_code == 201
-    project_id = project_response.json()["project_id"]
-    
-    # Now save a file
-    file_response = client.post(
-        "/api/files/save",
-        json={
-            "project_id": project_id,
-            "filename": "test.dfy",
-            "content": "module Test { }",
-            "file_type": "dfy"
-        },
-        headers=headers
-    )
-    
-    # Should succeed (200 or 201)
-    assert file_response.status_code in [200, 201], \
-        f"Expected success status, got {file_response.status_code}: {file_response.text}"
-    
-    data = file_response.json()
-    assert "file_id" in data
-    assert data["filename"] == "test.dfy"
+from api.main import app
+from api.database import get_db, hash_api_key, Project, File
 
 
-def test_update_file_endpoint(client, headers, db_session):
-    """Test updating a file - catches import errors"""
-    # Create project and file
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Test Project", "description": "Test"},
-        headers=headers
-    )
-    project_id = project_response.json()["project_id"]
-    
-    # Save initial file
-    save_response = client.post(
-        "/api/files/save",
-        json={
-            "project_id": project_id,
-            "filename": "test.dfy",
-            "content": "module Test { }",
-            "file_type": "dfy"
-        },
-        headers=headers
-    )
-    assert save_response.status_code in [200, 201]
-    file_id = save_response.json()["file_id"]
-    
-    # Update file
-    update_response = client.put(
-        f"/api/files/{file_id}",
-        json={
-            "content": "module Test { method Test() { } }",
-            "filename": "test.dfy"
-        },
-        headers=headers
-    )
-    
-    assert update_response.status_code == 200
-    data = update_response.json()
-    assert "method Test()" in data["content"]
+@pytest.fixture
+def client():
+    """Create test client."""
+    return TestClient(app)
 
 
-def test_delete_file_endpoint(client, headers, db_session):
-    """Test deleting a file - catches import errors"""
-    # Create project and file
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Test Project", "description": "Test"},
-        headers=headers
-    )
-    project_id = project_response.json()["project_id"]
-    
-    # Save file
-    save_response = client.post(
-        "/api/files/save",
-        json={
-            "project_id": project_id,
-            "filename": "test.dfy",
-            "content": "module Test { }",
-            "file_type": "dfy"
-        },
-        headers=headers
-    )
-    assert save_response.status_code in [200, 201]
-    file_id = save_response.json()["file_id"]
-    
-    # Delete file
-    delete_response = client.delete(
-        f"/api/files/{file_id}",
-        headers=headers
-    )
-    
-    assert delete_response.status_code == 200
+@pytest.fixture
+def test_db():
+    """Get test database session."""
+    db = next(get_db())
+    yield db
+    db.rollback()
 
 
-def test_list_files_endpoint(client, headers, db_session):
-    """Test listing files - catches import errors"""
-    # Create project
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Test Project", "description": "Test"},
-        headers=headers
+@pytest.fixture
+def test_project(test_db):
+    """Create a test project owned by dev_key_1."""
+    project = Project(
+        project_id=uuid.uuid4(),
+        name="Test Project for Files",
+        description="Testing file operations",
+        api_key_hash=hash_api_key("dev_key_1")
     )
-    project_id = project_response.json()["project_id"]
-    
-    # Save a file
-    save_response = client.post(
-        "/api/files/save",
-        json={
-            "project_id": project_id,
-            "filename": "test.dfy",
-            "content": "module Test { }",
-            "file_type": "dfy"
-        },
-        headers=headers
-    )
-    assert save_response.status_code in [200, 201]
-    
-    # List files
-    list_response = client.get(
-        f"/api/files?project_id={project_id}",
-        headers=headers
-    )
-    
-    assert list_response.status_code == 200
-    data = list_response.json()
-    assert "files" in data
-    assert len(data["files"]) >= 1  # At least README + our file
+    test_db.add(project)
+    test_db.commit()
+    test_db.refresh(project)
+    yield project
+    # Cleanup
+    test_db.delete(project)
+    test_db.commit()
 
 
-def test_get_file_with_string_uuid(client, headers, db_session):
-    """
-    Test that GET /api/files/{file_id} handles string UUIDs correctly.
-    This reproduces the SQLite UUID issue where path parameters come as strings
-    but need to be converted to UUID objects for database queries.
-    """
-    # Create project and file
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Test Project", "description": "Test"},
-        headers=headers
+@pytest.fixture
+def other_user_project(test_db):
+    """Create a test project owned by a different user."""
+    project = Project(
+        project_id=uuid.uuid4(),
+        name="Other User Project",
+        description="Owned by someone else",
+        api_key_hash=hash_api_key("other_user_key")
     )
-    project_id = project_response.json()["project_id"]
-    
-    save_response = client.post(
-        "/api/files/save",
-        json={
-            "project_id": project_id,
-            "filename": "test.dfy",
-            "content": "module Test { }",
-            "file_type": "dfy"
-        },
-        headers=headers
-    )
-    assert save_response.status_code in [200, 201]
-    file_id_str = save_response.json()["file_id"]  # String UUID from API
-    
-    # GET file using string UUID (as it comes from path parameter)
-    response = client.get(
-        f"/api/files/{file_id_str}",
-        headers=headers
-    )
-    
-    # Should succeed and return file info (after fix)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["file_id"] == file_id_str
-    assert data["filename"] == "test.dfy"
+    test_db.add(project)
+    test_db.commit()
+    test_db.refresh(project)
+    yield project
+    # Cleanup
+    test_db.delete(project)
+    test_db.commit()
 
 
-def test_update_file_with_string_uuid(client, headers, db_session):
-    """
-    Test that PUT /api/files/{file_id} handles string UUIDs correctly.
-    This reproduces the SQLite UUID issue where path parameters come as strings
-    but need to be converted to UUID objects for database queries.
-    """
-    # Create project and file
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Test Project", "description": "Test"},
-        headers=headers
-    )
-    project_id = project_response.json()["project_id"]
+class TestFileSave:
+    """Tests for POST /api/files/save endpoint."""
     
-    save_response = client.post(
-        "/api/files/save",
-        json={
-            "project_id": project_id,
-            "filename": "test.dfy",
-            "content": "module Test { }",
-            "file_type": "dfy"
-        },
-        headers=headers
-    )
-    assert save_response.status_code in [200, 201]
-    file_id_str = save_response.json()["file_id"]  # String UUID from API
+    def test_save_file_success(self, client, test_project):
+        """Successfully save a file to an owned project."""
+        response = client.post(
+            "/api/files/save",
+            headers={"X-API-Key": "dev_key_1"},
+            json={
+                "project_id": str(test_project.project_id),
+                "filename": "test.md",
+                "content": "# Test Content",
+                "file_type": "md"
+            }
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["filename"] == "test.md"
+        assert "file_id" in data
     
-    # UPDATE file using string UUID (as it comes from path parameter)
-    response = client.put(
-        f"/api/files/{file_id_str}",
-        json={
-            "content": "module Test { method Test() { } }",
-            "filename": "test.dfy"
-        },
-        headers=headers
-    )
+    def test_save_file_nonexistent_project(self, client):
+        """Saving to non-existent project should return 404."""
+        fake_project_id = str(uuid.uuid4())
+        response = client.post(
+            "/api/files/save",
+            headers={"X-API-Key": "dev_key_1"},
+            json={
+                "project_id": fake_project_id,
+                "filename": "test.md",
+                "content": "# Test",
+                "file_type": "md"
+            }
+        )
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
     
-    # Should succeed (after fix)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["file_id"] == file_id_str
-    assert "method Test()" in data["content"]
+    def test_save_file_wrong_owner(self, client, other_user_project):
+        """Saving to project owned by another user should return 404 (project not visible)."""
+        response = client.post(
+            "/api/files/save",
+            headers={"X-API-Key": "dev_key_1"},  # Not the owner
+            json={
+                "project_id": str(other_user_project.project_id),
+                "filename": "test.md",
+                "content": "# Test",
+                "file_type": "md"
+            }
+        )
+        # Returns 404 because project is not visible to this user
+        assert response.status_code == 404
+    
+    def test_save_file_empty_filename(self, client, test_project):
+        """Saving with empty filename should fail validation."""
+        response = client.post(
+            "/api/files/save",
+            headers={"X-API-Key": "dev_key_1"},
+            json={
+                "project_id": str(test_project.project_id),
+                "filename": "",
+                "content": "# Test",
+                "file_type": "md"
+            }
+        )
+        # icontract precondition on Shell should catch this
+        assert response.status_code in [400, 500]  # Either validation error or precondition
+    
+    def test_save_file_duplicate_filename(self, client, test_project, test_db):
+        """Saving with duplicate filename in same project should fail."""
+        # First, create a file
+        existing_file = File(
+            file_id=uuid.uuid4(),
+            project_id=test_project.project_id,
+            filename="existing.md",
+            content="# Existing",
+            file_type="md"
+        )
+        test_db.add(existing_file)
+        test_db.commit()
+        
+        try:
+            response = client.post(
+                "/api/files/save",
+                headers={"X-API-Key": "dev_key_1"},
+                json={
+                    "project_id": str(test_project.project_id),
+                    "filename": "existing.md",  # Duplicate
+                    "content": "# Test",
+                    "file_type": "md"
+                }
+            )
+            assert response.status_code == 409  # Conflict
+        finally:
+            test_db.delete(existing_file)
+            test_db.commit()
 
 
-def test_delete_file_with_string_uuid(client, headers, db_session):
-    """
-    Test that DELETE /api/files/{file_id} handles string UUIDs correctly.
-    This reproduces the SQLite UUID issue where path parameters come as strings
-    but need to be converted to UUID objects for database queries.
-    """
-    # Create project and file
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Test Project", "description": "Test"},
-        headers=headers
-    )
-    project_id = project_response.json()["project_id"]
+class TestFileGet:
+    """Tests for GET /api/files/{file_id} endpoint."""
     
-    save_response = client.post(
-        "/api/files/save",
-        json={
-            "project_id": project_id,
-            "filename": "test.dfy",
-            "content": "module Test { }",
-            "file_type": "dfy"
-        },
-        headers=headers
-    )
-    assert save_response.status_code in [200, 201]
-    file_id_str = save_response.json()["file_id"]  # String UUID from API
+    def test_get_file_success(self, client, test_project, test_db):
+        """Successfully get a file."""
+        file = File(
+            file_id=uuid.uuid4(),
+            project_id=test_project.project_id,
+            filename="getme.md",
+            content="# Get Me",
+            file_type="md"
+        )
+        test_db.add(file)
+        test_db.commit()
+        
+        try:
+            response = client.get(
+                f"/api/files/{file.file_id}",
+                headers={"X-API-Key": "dev_key_1"}
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["filename"] == "getme.md"
+            assert data["content"] == "# Get Me"
+        finally:
+            test_db.delete(file)
+            test_db.commit()
     
-    # DELETE file using string UUID (as it comes from path parameter)
-    response = client.delete(
-        f"/api/files/{file_id_str}",
-        headers=headers
-    )
+    def test_get_file_not_found(self, client):
+        """Getting non-existent file should return 404."""
+        fake_file_id = str(uuid.uuid4())
+        response = client.get(
+            f"/api/files/{fake_file_id}",
+            headers={"X-API-Key": "dev_key_1"}
+        )
+        assert response.status_code == 404
     
-    # Should succeed (after fix)
-    assert response.status_code == 200
+    def test_get_file_wrong_owner(self, client, other_user_project, test_db):
+        """Getting file from another user's project should return 404."""
+        file = File(
+            file_id=uuid.uuid4(),
+            project_id=other_user_project.project_id,
+            filename="private.md",
+            content="# Private",
+            file_type="md"
+        )
+        test_db.add(file)
+        test_db.commit()
+        
+        try:
+            response = client.get(
+                f"/api/files/{file.file_id}",
+                headers={"X-API-Key": "dev_key_1"}  # Wrong owner
+            )
+            assert response.status_code == 404
+        finally:
+            test_db.delete(file)
+            test_db.commit()
+
+
+class TestFileUpdate:
+    """Tests for PUT /api/files/{file_id} endpoint."""
+    
+    def test_update_file_success(self, client, test_project, test_db):
+        """Successfully update a file."""
+        file = File(
+            file_id=uuid.uuid4(),
+            project_id=test_project.project_id,
+            filename="update.md",
+            content="# Original",
+            file_type="md"
+        )
+        test_db.add(file)
+        test_db.commit()
+        
+        try:
+            response = client.put(
+                f"/api/files/{file.file_id}",
+                headers={"X-API-Key": "dev_key_1"},
+                json={"content": "# Updated Content"}
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["content"] == "# Updated Content"
+        finally:
+            test_db.delete(file)
+            test_db.commit()
+    
+    def test_update_file_not_found(self, client):
+        """Updating non-existent file should return 404."""
+        fake_file_id = str(uuid.uuid4())
+        response = client.put(
+            f"/api/files/{fake_file_id}",
+            headers={"X-API-Key": "dev_key_1"},
+            json={"content": "# Updated"}
+        )
+        assert response.status_code == 404
+    
+    def test_update_file_wrong_owner(self, client, other_user_project, test_db):
+        """Updating file from another user's project should return 403."""
+        file = File(
+            file_id=uuid.uuid4(),
+            project_id=other_user_project.project_id,
+            filename="private.md",
+            content="# Private",
+            file_type="md"
+        )
+        test_db.add(file)
+        test_db.commit()
+        
+        try:
+            response = client.put(
+                f"/api/files/{file.file_id}",
+                headers={"X-API-Key": "dev_key_1"},  # Wrong owner
+                json={"content": "# Hacked!"}
+            )
+            assert response.status_code == 403
+        finally:
+            test_db.delete(file)
+            test_db.commit()
+
+
+class TestFileDelete:
+    """Tests for DELETE /api/files/{file_id} endpoint."""
+    
+    def test_delete_file_success(self, client, test_project, test_db):
+        """Successfully delete a file."""
+        file = File(
+            file_id=uuid.uuid4(),
+            project_id=test_project.project_id,
+            filename="deleteme.md",
+            content="# Delete Me",
+            file_type="md"
+        )
+        test_db.add(file)
+        test_db.commit()
+        
+        response = client.delete(
+            f"/api/files/{file.file_id}",
+            headers={"X-API-Key": "dev_key_1"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
+    
+    def test_delete_file_not_found(self, client):
+        """Deleting non-existent file should return 404."""
+        fake_file_id = str(uuid.uuid4())
+        response = client.delete(
+            f"/api/files/{fake_file_id}",
+            headers={"X-API-Key": "dev_key_1"}
+        )
+        assert response.status_code == 404
+    
+    def test_delete_file_wrong_owner(self, client, other_user_project, test_db):
+        """Deleting file from another user's project should return 403."""
+        file = File(
+            file_id=uuid.uuid4(),
+            project_id=other_user_project.project_id,
+            filename="protected.md",
+            content="# Protected",
+            file_type="md"
+        )
+        test_db.add(file)
+        test_db.commit()
+        
+        try:
+            response = client.delete(
+                f"/api/files/{file.file_id}",
+                headers={"X-API-Key": "dev_key_1"}  # Wrong owner
+            )
+            assert response.status_code == 403
+        finally:
+            # File should still exist
+            test_db.refresh(file)
+            test_db.delete(file)
+            test_db.commit()
+
+
+class TestFileList:
+    """Tests for GET /api/files endpoint."""
+    
+    def test_list_files_empty(self, client, test_project):
+        """List files when project has no files."""
+        response = client.get(
+            f"/api/files?project_id={test_project.project_id}",
+            headers={"X-API-Key": "dev_key_1"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 0
+        assert data["files"] == []
+    
+    def test_list_files_with_files(self, client, test_project, test_db):
+        """List files when project has files."""
+        file1 = File(
+            file_id=uuid.uuid4(),
+            project_id=test_project.project_id,
+            filename="file1.md",
+            content="# File 1",
+            file_type="md"
+        )
+        file2 = File(
+            file_id=uuid.uuid4(),
+            project_id=test_project.project_id,
+            filename="file2.dfy",
+            content="method Test() {}",
+            file_type="dfy"
+        )
+        test_db.add(file1)
+        test_db.add(file2)
+        test_db.commit()
+        
+        try:
+            response = client.get(
+                f"/api/files?project_id={test_project.project_id}",
+                headers={"X-API-Key": "dev_key_1"}
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total"] == 2
+        finally:
+            test_db.delete(file1)
+            test_db.delete(file2)
+            test_db.commit()
+    
+    def test_list_files_other_user_project(self, client, other_user_project, test_db):
+        """List files should not show files from other user's projects."""
+        file = File(
+            file_id=uuid.uuid4(),
+            project_id=other_user_project.project_id,
+            filename="secret.md",
+            content="# Secret",
+            file_type="md"
+        )
+        test_db.add(file)
+        test_db.commit()
+        
+        try:
+            response = client.get(
+                f"/api/files?project_id={other_user_project.project_id}",
+                headers={"X-API-Key": "dev_key_1"}  # Wrong owner
+            )
+            assert response.status_code == 200
+            data = response.json()
+            # Should not see the file
+            assert data["total"] == 0
+        finally:
+            test_db.delete(file)
+            test_db.commit()

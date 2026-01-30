@@ -1,12 +1,18 @@
 """
 Integration tests for Authentication API endpoints
 Smoke tests to ensure endpoints are routed correctly and handle requests.
+
+Tests cover:
+- OAuth flow endpoints
+- JWT token handling
+- AuthService integration
 """
 
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime, timedelta
+import os
 
 
 def test_auth_github_endpoint_existence(client, monkeypatch):
@@ -204,3 +210,124 @@ def test_auth_me_with_string_uuid_in_token(client, db_session, monkeypatch):
     data = response.json()
     assert data["user_id"] == user_id_str
     assert data["github_login"] == "testuser_uuid"
+
+
+# ============================================================
+# AuthService Tests
+# ============================================================
+
+class TestAuthService:
+    """Tests for the AuthService class (Imperative Shell)."""
+    
+    def test_auth_service_with_valid_key(self, monkeypatch):
+        """AuthService initializes correctly with valid ENCRYPTION_KEY."""
+        from cryptography.fernet import Fernet
+        valid_key = Fernet.generate_key().decode()
+        
+        monkeypatch.setenv("ENCRYPTION_KEY", valid_key)
+        
+        # Reset singleton
+        import api.services.auth_service as auth_service_module
+        auth_service_module._auth_service = None
+        
+        from api.services.auth_service import AuthService
+        service = AuthService()
+        
+        # Should be able to encrypt/decrypt
+        encrypted = service.encrypt_github_token("test_token")
+        decrypted = service.decrypt_github_token(encrypted)
+        assert decrypted == "test_token"
+    
+    def test_auth_service_fails_in_production_without_key(self, monkeypatch):
+        """AuthService raises error in production when ENCRYPTION_KEY is missing."""
+        monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        
+        # Reset singleton
+        import api.services.auth_service as auth_service_module
+        auth_service_module._auth_service = None
+        
+        from api.services.auth_service import AuthService, AuthServiceConfigError
+        
+        with pytest.raises(AuthServiceConfigError) as exc_info:
+            AuthService()
+        
+        assert "ENCRYPTION_KEY must be set in production" in str(exc_info.value)
+    
+    def test_auth_service_warns_in_development_without_key(self, monkeypatch, caplog):
+        """AuthService warns but works in development when ENCRYPTION_KEY is missing."""
+        monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        
+        # Reset singleton
+        import api.services.auth_service as auth_service_module
+        auth_service_module._auth_service = None
+        
+        import logging
+        caplog.set_level(logging.WARNING)
+        
+        from api.services.auth_service import AuthService
+        service = AuthService()
+        
+        # Should work (with ephemeral key)
+        encrypted = service.encrypt_github_token("test_token")
+        assert len(encrypted) > 0
+        
+        # Should have logged a warning
+        assert any("ephemeral key" in record.message for record in caplog.records)
+    
+    def test_auth_service_invalid_key_format(self, monkeypatch):
+        """AuthService raises error when ENCRYPTION_KEY has invalid format."""
+        monkeypatch.setenv("ENCRYPTION_KEY", "not-a-valid-fernet-key")
+        
+        # Reset singleton
+        import api.services.auth_service as auth_service_module
+        auth_service_module._auth_service = None
+        
+        from api.services.auth_service import AuthService, AuthServiceConfigError
+        
+        with pytest.raises(AuthServiceConfigError) as exc_info:
+            AuthService()
+        
+        assert "Invalid ENCRYPTION_KEY format" in str(exc_info.value)
+    
+    def test_get_auth_service_singleton(self, monkeypatch):
+        """get_auth_service returns same instance (singleton pattern)."""
+        from cryptography.fernet import Fernet
+        valid_key = Fernet.generate_key().decode()
+        
+        monkeypatch.setenv("ENCRYPTION_KEY", valid_key)
+        
+        # Reset singleton
+        import api.services.auth_service as auth_service_module
+        auth_service_module._auth_service = None
+        
+        from api.services.auth_service import get_auth_service
+        
+        service1 = get_auth_service()
+        service2 = get_auth_service()
+        
+        assert service1 is service2
+
+
+class TestLegacyEncryptTokenWrapper:
+    """Tests for legacy encrypt_token/decrypt_token wrappers in auth.py."""
+    
+    def test_legacy_encrypt_token_works(self, monkeypatch):
+        """Legacy encrypt_token wrapper delegates to AuthService."""
+        from cryptography.fernet import Fernet
+        valid_key = Fernet.generate_key().decode()
+        
+        monkeypatch.setenv("ENCRYPTION_KEY", valid_key)
+        
+        # Reset singleton
+        import api.services.auth_service as auth_service_module
+        auth_service_module._auth_service = None
+        
+        import api.auth
+        
+        encrypted = api.auth.encrypt_token("legacy_test_token")
+        assert len(encrypted) > 0
+        
+        decrypted = api.auth.decrypt_token(encrypted)
+        assert decrypted == "legacy_test_token"
