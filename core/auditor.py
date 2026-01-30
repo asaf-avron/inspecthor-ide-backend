@@ -1,6 +1,6 @@
 # Guardian Gateway - Core Auditor
 # LLM-powered specification analysis using Google Gemini
-# Functional Core: No Streamlit imports allowed
+# Functional Core: No UI framework imports in core
 
 """
 The Spec Auditor: Analyzes specification text for logic gaps and ambiguities.

@@ -1,5 +1,7 @@
 # **Feature Spec: Guardian "Spec Lens"**
 
+> **Note:** The UI has moved to the Next.js IDE; the "Imperative Shell (Streamlit)" section is historical.
+
 ## **1\. The Logic Model (The State)**
 
 The Spec Lens is a "Translation Engine." It takes raw Dafny code and converts it into a structured object that the UI can render.
