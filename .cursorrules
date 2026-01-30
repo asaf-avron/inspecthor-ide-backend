@@ -1,5 +1,71 @@
+# InspecThor / Guardian Gateway - Cursor Rules
+
+## Communication Style
 - Be extremely concise. No conversational filler (e.g., avoid "Here is the code," "I hope this helps," "Sure!").
 - When suggesting code changes, ONLY return the modified lines with minimal context. Do NOT reprint the entire file unless explicitly asked.
 - Use `// ... existing code ...` to skip unchanged sections.
 - If the solution is simple, provide the code block immediately without a preamble.
 - Assume I am an expert developer; do not explain basic concepts unless the logic is complex.
+- When noticing new patterns, conventions, or architectural decisions that aren't documented in .cursorrules, proactively suggest updating .cursorrules to reflect them.
+
+## Project Structure
+- Monorepo: `inspecthor-ide-frontend/` (Next.js) and `inspecthor-ide-backend/` (FastAPI)
+- Backend has formally verified Dafny specifications in `api/verification/*.dfy`
+- Frontend uses shadcn/ui components from `components/ui/`
+- Shared types: Frontend `lib/types.ts` matches backend Pydantic models
+
+## Backend Guidelines (Python/FastAPI)
+- Formally verified core: `api/core/*.py` must match Dafny specs in `api/verification/*.dfy`
+- Use `@icontract` decorators for runtime contract enforcement matching Dafny pre/post conditions
+- Immutable dataclasses: `api/core/models.py` uses `@dataclass(frozen=True)` matching Dafny datatypes
+- Database: SQLAlchemy models in `api/database.py`, Alembic migrations in `api/alembic/versions/`
+- Authentication: JWT tokens + GitHub OAuth, lazy auth pattern (local-first, authenticate when needed)
+- API routes: FastAPI routers in `api/*.py`, middleware in `api/middleware.py`
+- Verification: Docker-based Dafny verifier service, no local installation required
+- Code style: Ruff linter, 88 char line length, type hints required
+
+## Frontend Guidelines (Next.js/React/TypeScript)
+- App Router: Pages in `app/`, API routes in `app/api/`
+- Components: UI primitives in `components/ui/`, IDE components in `components/ide/`
+- State management: React Context (ProjectProvider, FileProvider, VerificationProvider, AuthProvider)
+- Local-first: IndexedDB for local projects via `lib/local-storage.ts`, sync queue for cloud migration
+- Type safety: All API types in `lib/types.ts` matching backend Pydantic models
+- API client: `lib/api-client.ts` handles all backend communication
+- Styling: Tailwind CSS, shadcn/ui components, dark mode via next-themes
+- Code style: TypeScript strict mode, functional components with hooks
+
+## Architecture Patterns
+- **Local-first**: Users can work offline, authenticate when needed for cloud features
+- **Formal verification**: Backend core logic verified in Dafny, Python implementation matches specs
+- **Spec-first**: Dafny specs define contracts, Python implements them with `@icontract` enforcement
+- **Immutable state**: Core models are frozen dataclasses, state transitions return new instances
+- **Provider nesting**: ThemeProvider > AuthProvider > ProjectProvider > FileProvider > VerificationProvider
+
+## Key Files
+- Backend entry: `api/main.py`
+- Frontend entry: `app/layout.tsx`, `app/page.tsx`
+- Backend core: `api/core/models.py`, `api/core/file_operations.py`, `api/core/project_management.py`
+- Frontend state: `lib/project-context.tsx`, `lib/file-context.tsx`, `lib/auth-context.tsx`
+- Types: `lib/types.ts` (frontend), Pydantic models in `api/models.py` (backend)
+
+## Testing & Verification
+- Backend tests: `tests/` directory, pytest
+- Dafny verification: CI workflow `.github/workflows/verify-dafny.yml`
+- Formally verified components: See `docs/formally-verified/` for specs
+- When modifying verified code: Update both Dafny spec AND Python implementation
+
+## Scripts & Development
+- Use Git Bash for shell scripts (`.sh` files) - no redundant `.bat`, `.ps1`, or Windows-specific scripts
+- Development scripts: `dev.sh` (starts all services)
+- Avoid maintaining multiple script formats - prefer `.sh` for cross-platform compatibility via Git Bash
+
+## Environment Variables
+- Backend: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `JWT_SECRET`, `ENCRYPTION_KEY`, `DATABASE_URL`
+- Frontend: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_GUARDIAN_API_KEY`
+
+## Next Steps (From IMPLEMENTATION_SUMMARY.md)
+- [ ] Implement local project creation flow
+- [ ] Implement cloud sync after authentication
+- [ ] Add auth triggers to verification/AI features
+- [ ] Implement conflict resolution
+- [ ] Add loading states for auth checks
