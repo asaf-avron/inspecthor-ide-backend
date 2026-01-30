@@ -297,6 +297,30 @@ class VerifyRequest(BaseModel):
     verbosity: Literal["quiet", "normal", "verbose"] = "normal"
 
 
+class VerifyPythonRequest(BaseModel):
+    """Request to verify Python implementation against a Dafny contract (Guardian + Transpiler + Dafny)."""
+    python_code: str
+    contract_code: Optional[str] = None  # Inline contract; ignored if spec_id is set
+    spec_id: Optional[str] = None  # If set, contract is read from Trust Registry
+    timeout_seconds: int = 30
+    solver: Literal["z3", "cvc5"] = "z3"
+
+
+class RegisterSpecRequest(BaseModel):
+    """Register a Dafny spec as ground truth in the Trust Registry."""
+    spec_id: str
+    content: str
+    metadata: Optional[dict] = None
+
+
+class SpecResponse(BaseModel):
+    """A spec entry from the Trust Registry."""
+    spec_id: str
+    content: str
+    created_at: str
+    metadata: dict = {}
+
+
 class VerifyResponse(BaseModel):
     verified: bool
     verification_time_ms: int
@@ -304,6 +328,9 @@ class VerifyResponse(BaseModel):
     errors: List[VerificationError]
     warnings: List[dict]
     solver_output: str
+    # Guardian AST gate: set when Python is rejected before transpilation
+    guardian_status: Optional[Literal["OK", "REJECTED_BY_ARCHITECT"]] = None
+    guardian_reason: Optional[str] = None
 
 
 # === Utility Models ===

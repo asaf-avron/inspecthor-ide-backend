@@ -18,11 +18,15 @@ import logging
 from api.models import (
     VerifyRequest,
     VerifyResponse,
+    VerifyPythonRequest,
     VerificationResult,
     VerificationError,
     GapLocation
 )
 from api.services.verifier_client import VerifierClient, is_verifier_available
+from api.guardian import check_python_source
+from api.transpiler import transpile_python_to_dafny
+from api.transpiler.merger import DafnyMerger
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +147,133 @@ async def verify_dafny(request: VerifyRequest):
     
     # Fall back to local Dafny CLI
     return await verify_local(request)
+
+
+@router.post("/verify/python", response_model=VerifyResponse)
+async def verify_python(request: VerifyPythonRequest):
+    """
+    Verify Python implementation against a Dafny contract (Dual-Channel flow).
+
+    Flow: Guardian AST gate -> deterministic Transpiler -> merge with contract -> Dafny verify.
+    If the Guardian rejects the Python (dirty code), returns REJECTED_BY_ARCHITECT without
+    sending code to the Transpiler or Dafny.
+    Contract: provide contract_code inline, or spec_id to read from Trust Registry.
+    """
+    # Resolve contract: from Trust Registry if spec_id set, else inline contract_code
+    contract_code: Optional[str] = None
+    if request.spec_id:
+        from api.trust_registry import get_trust_registry
+        contract_code = get_trust_registry().get_contract(request.spec_id)
+        if not contract_code:
+            return VerifyResponse(
+                verified=False,
+                verification_time_ms=0,
+                results=[],
+                errors=[VerificationError(
+                    type="verification",
+                    line=0,
+                    column=0,
+                    message=f"Spec not found in Trust Registry: {request.spec_id}",
+                    suggestion=None,
+                )],
+                warnings=[],
+                solver_output="",
+                guardian_status="OK",
+            )
+    else:
+        contract_code = request.contract_code
+    if not contract_code:
+        return VerifyResponse(
+            verified=False,
+            verification_time_ms=0,
+            results=[],
+            errors=[VerificationError(
+                type="verification",
+                line=0,
+                column=0,
+                message="Either contract_code or spec_id must be provided",
+                suggestion=None,
+            )],
+            warnings=[],
+            solver_output="",
+            guardian_status="OK",
+        )
+
+    # 1. Guardian AST gate
+    guardian_result = check_python_source(request.python_code)
+    if not guardian_result.passed:
+        return VerifyResponse(
+            verified=False,
+            verification_time_ms=0,
+            results=[],
+            errors=[],
+            warnings=[],
+            solver_output="",
+            guardian_status="REJECTED_BY_ARCHITECT",
+            guardian_reason=guardian_result.reason or "Code rejected by Guardian AST gate.",
+        )
+
+    # 2. Deterministic Transpiler (Verification Bridge)
+    transpile_result = transpile_python_to_dafny(request.python_code)
+    if not transpile_result.success:
+        return VerifyResponse(
+            verified=False,
+            verification_time_ms=0,
+            results=[],
+            errors=[VerificationError(
+                type="verification",
+                line=0,
+                column=0,
+                message=transpile_result.error or "Transpilation failed",
+                suggestion=None,
+            )],
+            warnings=[],
+            solver_output="",
+            guardian_status="OK",
+        )
+
+    # 3. Merge contract with implementation
+    merger = DafnyMerger()
+    merge_result = merger.merge_contract_and_impl(
+        contract=contract_code,
+        implementation=transpile_result.dafny_code,
+    )
+    if not merge_result.success:
+        return VerifyResponse(
+            verified=False,
+            verification_time_ms=0,
+            results=[],
+            errors=[VerificationError(
+                type="verification",
+                line=0,
+                column=0,
+                message=merge_result.error or "Merge failed",
+                suggestion=None,
+            )],
+            warnings=[],
+            solver_output="",
+            guardian_status="OK",
+        )
+
+    # 4. Verify merged Dafny (wrap in module if needed for Dafny)
+    merged_code = merge_result.merged_code
+    if not merged_code.strip().startswith("module "):
+        merged_code = f"module M {{\n{merged_code}\n}}"
+    verify_request = VerifyRequest(
+        dafny_code=merged_code,
+        timeout_seconds=request.timeout_seconds,
+        solver=request.solver,
+    )
+    response = await verify_dafny(verify_request)
+    return VerifyResponse(
+        verified=response.verified,
+        verification_time_ms=response.verification_time_ms,
+        results=response.results,
+        errors=response.errors,
+        warnings=response.warnings,
+        solver_output=response.solver_output,
+        guardian_status="OK",
+    )
 
 
 async def verify_via_service(request: VerifyRequest) -> VerifyResponse:

@@ -49,6 +49,12 @@ graph TB
 - Executes verification checks
 - Parses verification results
 
+#### Guardian and Verification Bridge (Provenance of Truth)
+- **Guardian** (`api/guardian/`): Restricted AST gate. Only Pure Functional Core Python (whitelist: BinOp, Compare, Assign, pure FunctionDef; illegal: Import, non-pure Call, Try/Except) may be transpiled. Rejected code returns REJECTED_BY_ARCHITECT (Guardian Terminal).
+- **Deterministic Transpiler** (`api/transpiler/ast_to_dafny.py`): Programmatic Python AST → Dafny method body (Verification Bridge). No LLM in this step.
+- **Trust Registry** (`api/trust_registry.py`): Ground truth store for Dafny specs. Pipeline may read contract by `spec_id` when verifying Python.
+- **Python verification:** `POST /api/verify/python` — Guardian → Transpiler → merge with contract → Dafny verify. Contract from inline `contract_code` or Trust Registry `spec_id`.
+
 #### `core_parser.py`
 - Parses various input formats
 - Extracts requirements from documents

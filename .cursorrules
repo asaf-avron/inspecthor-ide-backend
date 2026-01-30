@@ -22,6 +22,8 @@
 - Authentication: JWT tokens + GitHub OAuth, lazy auth pattern (local-first, authenticate when needed)
 - API routes: FastAPI routers in `api/*.py`, middleware in `api/middleware.py`
 - Verification: Docker-based Dafny verifier service, no local installation required
+- **Provenance of Truth (Dual-Channel):** Python verification flow: Guardian AST gate (`api/guardian/`) → deterministic Transpiler (`api/transpiler/ast_to_dafny.py`) → merge → Dafny verify. LLM may suggest Python; only the programmatic Transpiler produces Dafny from Python. Dirty Python → REJECTED_BY_ARCHITECT (Guardian Terminal).
+- **Trust Registry:** Ground truth for Dafny specs in `api/trust_registry.py`; register/get via `/api/trust-registry/specs`. Verify Python with `spec_id` to read contract from registry.
 - Code style: Ruff linter, 88 char line length, type hints required
 
 ## Frontend Guidelines (Next.js/React/TypeScript)

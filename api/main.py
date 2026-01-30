@@ -41,6 +41,7 @@ from api.files import get_api_key_from_header
 from api import verification
 from api import deconstruct
 from api import projects
+from api import trust_registry_routes
 from api import auth
 from api.auth import get_current_user
 from api.github import webhooks as github_webhooks
@@ -126,6 +127,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router)
 app.include_router(files.router)
 app.include_router(verification.router)
+app.include_router(trust_registry_routes.router)
 app.include_router(deconstruct.router)
 app.include_router(projects.router)
 app.include_router(github_webhooks.router)
