@@ -25,7 +25,7 @@ The Spec Auditor is a "Semantic Analysis Engine." It takes unstructured English 
 
 ## **3\. The Imperative Shell (Streamlit Update)**
 
-* **New Tab:** Add a "Spec Auditor" tab to the existing app.py.  
+* **New Tab:** Add a "Spec Auditor" tab to the existing app.py. *(The referenced app was the legacy Streamlit UI; the current UI is Next.js.)*  
 * **Input:** Text Area (for pasting the spec) or "Load Template" button.  
 * **Output:**  
   * **Gap Cards:** Red cards for Critical Gaps.  

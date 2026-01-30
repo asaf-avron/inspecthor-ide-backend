@@ -1,6 +1,6 @@
 # Guardian Gateway - Core Gateway
 # Verification engine that transpiles Python to Dafny and verifies against contracts
-# Functional Core: No Streamlit imports allowed
+# Functional Core: No UI framework imports in core
 
 """
 The Code Verifier: Transpiles Python code to Dafny and verifies it against contracts.

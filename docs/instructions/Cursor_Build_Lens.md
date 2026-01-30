@@ -1,5 +1,7 @@
 # **Master Instruction: Guardian Spec Lens (Phase 1\)**
 
+> **Deprecation note:** This instruction set referred to the deprecated Streamlit UI. The current UI is the Next.js IDE; the backend is FastAPI. Use the API and frontend codebase for new work.
+
 Context:  
 We are building "Guardian Gateway," a formal verification tool.  
 We are implementing the Spec Lens feature: a visualization dashboard that translates Dafny code into human-readable cards.  
