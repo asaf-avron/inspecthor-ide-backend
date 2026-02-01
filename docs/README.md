@@ -54,6 +54,7 @@ The `architecture/` subfolder has been consolidated into `ARCHITECTURE.md`. Cont
 
 ### Specifications (Implementation Specs)
 - **[specs/](specs/)** - Feature specifications for NASA-grade pivot
+  - **`Spec_Steel_Thread_Master.md`** - **MASTER SPEC** - Takes precedence over all others
   - `Spec_Blueprint_Nomenclature_Refactor.md` - Phase 1: Project→Blueprint rename
   - `Spec_Verification_Condition_Generator.md` - Phase 2: Deterministic VC generation
   - `Spec_Trust_Registry.md` - Phase 3: Immutable proof ledger
