@@ -42,15 +42,17 @@ sequenceDiagram
     
     User->>UI: Click "Verify"
     UI->>API: POST /api/v1/verify/run
-    API->>VE: Execute Dafny
+    API->>VE: Execute Dafny verification
     VE-->>API: Proof result
+    API->>VE: Compile Dafny to Python
+    VE-->>API: generated/kernel.py
     API->>TR: Append to ledger
     TR-->>API: Proof certificate
     API-->>UI: Display verified badge
     
     User->>UI: Click "Commit to GitHub"
     UI->>API: POST /api/v1/github/commit
-    API->>GH: Ghost Commit (verified files)
+    API->>GH: Ghost Commit (kernel.py + proofs)
     GH-->>API: Commit + optional PR
     API-->>UI: Success + GitHub URL
 ```
@@ -67,20 +69,20 @@ Every InspecThor-managed repository must follow this structure. The system enfor
 repository/
 ├── blueprint.yaml          # THE LAW - Immutable manifest
 ├── claims/                  # Human-written specifications
-│   └── *.nd                 # Natural Dafny (English + formal hints)
+│   └── *.md                 # Structured English claims
 ├── kernel/                  # Formally Verified Zone (Dafny only)
 │   ├── Main.dfy             # Entry point - all logic here
 │   ├── Prelude.dfy          # Domain types + invariants
 │   └── *.dfy                # Additional modules
-├── shell/                   # Unverified Zone (Python/TypeScript)
-│   ├── main.py              # Entry point - I/O only
+├── shell/                   # Unverified Zone (I/O only)
+│   ├── main.py              # Entry point - imports generated/kernel.py
 │   └── adapters/            # External integrations
 ├── generated/               # AUTO-GENERATED - Never edit
+│   ├── kernel.py            # Python compiled from kernel/*.dfy
 │   ├── contracts.dfy        # VCs from claims
 │   └── proofs/              # Proof certificates
 └── .inspecthor/             # System metadata
-    ├── config.yaml          # Local settings
-    └── cache/               # VC cache
+    └── config.yaml          # Local settings
 ```
 
 ### 2.2 The Manifest (blueprint.yaml)
@@ -96,7 +98,7 @@ invariants:
   - "Total system money is conserved"
 
 claims:
-  - path: "claims/transfer.nd"
+  - path: "claims/transfer.md"
     id: "REQ-101"
     status: "verified"  # unverified | verified | failed
 
@@ -169,9 +171,156 @@ if __name__ == "__main__":
     ".inspecthor/config.yaml": """# Local configuration
 cache_enabled: true
 auto_verify: false
+""",
+    ".github/workflows/verify.yml": """# InspecThor Verification Pipeline
+# Auto-generated - ensures all PRs are formally verified
+
+name: InspecThor Verify
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'kernel/**'
+      - 'claims/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'kernel/**'
+      - 'claims/**'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Dafny
+        run: |
+          wget https://github.com/dafny-lang/dafny/releases/download/v4.4.0/dafny-4.4.0-x64-ubuntu-20.04.zip
+          unzip dafny-4.4.0-x64-ubuntu-20.04.zip -d /opt/dafny
+          echo "/opt/dafny/dafny" >> $GITHUB_PATH
+      
+      - name: Verify Kernel
+        run: dafny verify kernel/Main.dfy
+      
+      - name: Compile to Python
+        run: dafny build --target:py kernel/Main.dfy -o generated/kernel
+      
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-kernel
+          path: generated/kernel.py
 """
 }
+
+---
+
+## 2.4 Post-Genesis Workflow (Day 2+)
+
+Once the repository is initialized, the development loop begins:
+
+### In the IDE (InspecThor Canvas)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Connected: Open Blueprint
+    Connected --> Editing: Select claim file
+    Editing --> VCGenerated: Save claim
+    VCGenerated --> Verifying: Click "Verify"
+    Verifying --> Verified: All VCs pass
+    Verifying --> Failed: VCs fail
+    Failed --> Editing: Fix claim
+    Verified --> Compiling: Auto-compile to Python
+    Compiling --> ReadyToCommit: kernel.py generated
+    ReadyToCommit --> Committed: Click "Push to GitHub"
+    Committed --> [*]: Done
 ```
+
+**IDE Behavior:**
+
+| Event | IDE Action |
+|-------|------------|
+| User opens Blueprint | Sync `blueprint.yaml` from repo |
+| User edits `claims/*.md` | Auto-save locally, show VC preview |
+| User clicks "Verify" | Call backend API, show live progress |
+| Verification passes | Auto-compile Dafny → Python |
+| User clicks "Push" | Ghost Commit: kernel.py + proof.json |
+| PR is created | Show GitHub link, track CI status |
+
+### In the Git Repository
+
+```mermaid
+gitGraph
+    commit id: "🏛️ Genesis" tag: "v0.0.1"
+    branch feature/transfer
+    checkout feature/transfer
+    commit id: "Add transfer claim"
+    commit id: "✓ Verified: REQ-101"
+    checkout main
+    merge feature/transfer tag: "v0.1.0"
+    commit id: "Add withdraw claim"
+    commit id: "✓ Verified: REQ-102"
+```
+
+**Git Workflow:**
+
+1. **Genesis commit** creates base structure
+2. **Feature branches** for new claims
+3. **Verified commits** include proof certificates
+4. **PRs blocked** until verification passes (via GitHub Actions)
+5. **Main branch** always contains verified code
+
+### GitHub Actions Enforcement
+
+The genesis push includes `.github/workflows/verify.yml`:
+
+```yaml
+# .github/workflows/verify.yml (pushed during genesis)
+name: InspecThor Verify
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'kernel/**'
+      - 'claims/**'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Dafny
+        run: |
+          wget https://github.com/dafny-lang/dafny/releases/download/v4.4.0/dafny-4.4.0-x64-ubuntu-20.04.zip
+          unzip dafny-4.4.0-x64-ubuntu-20.04.zip -d /opt/dafny
+          echo "/opt/dafny/dafny" >> $GITHUB_PATH
+      
+      - name: Verify Kernel
+        run: dafny verify kernel/Main.dfy
+        
+      - name: Compile to Python
+        run: dafny build --target:py kernel/Main.dfy -o generated/kernel
+```
+
+**Enforcement:**
+
+- GitHub branch protection rules require this check to pass
+- PRs cannot merge without green verification status
+- The CI is **independent** of InspecThor backend (runs in GitHub's infra)
+- Even if someone bypasses the IDE, the repo still enforces verification
+
+### Two-Layer Protection
+
+| Layer | Enforcement Point | Bypassed By |
+|-------|-------------------|-------------|
+| **IDE** | "Push" button requires verification | Direct git push |
+| **GitHub Actions** | PR merge requires CI pass | Admin override only |
+
+**The Guarantee:** Even if someone pushes directly via `git push`, the GitHub Action blocks merging until verification passes.
 
 ---
 
@@ -190,8 +339,8 @@ auto_verify: false
 | Commit: Use `GhostCommitService` | Already implemented | DONE |
 
 ### Phase 1: Foundation (From existing spec)
-- Rename Project → Blueprint (after Phase 0 validates flow)
-- Database migration with backward compat
+- Rename Project → Blueprint (clean break, no backward compat)
+- Database migration (drop old tables after migration)
 
 ### Phase 2: The Bridge (From existing spec)
 - VC Generator (deterministic, not LLM)
@@ -350,22 +499,52 @@ auto_verify: false
 
 ---
 
-## 8. Migration Path
+## 8. Dafny to Python Compilation
 
-### From Current State to Steel Thread
+### The Compilation Step
 
-1. **Backward Compatibility:** 
-   - Existing `/api/projects/*` endpoints continue to work
-   - New `/api/v1/blueprints/*` endpoints are additive
+After verification passes, Dafny compiles the kernel to Python:
 
-2. **Feature Flags:**
-   - `ENABLE_BLUEPRINT_GENESIS=true` for early adopters
-   - `ENABLE_TRUST_REGISTRY=false` until Phase 3
+```bash
+# Verify first
+dafny verify kernel/Main.dfy
 
-3. **Database:**
-   - `projects` table remains until Phase 1 migration
-   - `blueprints` table created alongside
-   - Migration copies data, doesn't delete
+# Then compile to Python
+dafny build --target:py kernel/Main.dfy -o generated/kernel
+```
+
+**Output:** `generated/kernel.py` - A Python module with verified logic.
+
+### Shell Integration
+
+The shell layer imports the generated kernel:
+
+```python
+# shell/main.py
+from generated.kernel import Kernel
+
+class PaymentService:
+    def __init__(self):
+        self.kernel = Kernel()
+    
+    def transfer(self, from_id: str, to_id: str, amount: float):
+        # I/O: Load from database
+        sender = self.db.get_account(from_id)
+        receiver = self.db.get_account(to_id)
+        
+        # VERIFIED LOGIC: Call kernel
+        result = self.kernel.Transfer(sender, receiver, amount)
+        
+        # I/O: Save to database
+        self.db.save_accounts([sender, receiver])
+        return result
+```
+
+### Key Principle
+
+- **kernel/*.dfy** → Business logic (formally verified)
+- **generated/kernel.py** → Compiled output (never edit)
+- **shell/main.py** → I/O wrapper (imports kernel)
 
 ---
 
@@ -448,3 +627,106 @@ curl -X POST http://localhost:8000/api/v1/blueprints/initialize \
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-02-01 | Initial Steel Thread specification |
+| 1.1 | 2026-02-01 | Added post-genesis workflow, GitHub Actions, Python compilation |
+| 1.2 | 2026-02-01 | Added implementation checklist, cleanup strategy, testing plan |
+
+---
+
+## Appendix C: Implementation Checklist
+
+### Backend Tasks
+
+| # | Task | File | Effort |
+|---|------|------|--------|
+| B1 | Create `BlueprintGenesisService` | `api/services/blueprint_genesis.py` (NEW) | 2h |
+| B2 | Create `/api/v1/blueprints/initialize` endpoint | `api/endpoints/blueprints.py` (NEW) | 1h |
+| B3 | Register router in main.py | `api/main.py` (MODIFY) | 15m |
+| B4 | Create genesis template files | `assets/genesis/` (NEW) | 30m |
+| B5 | Write backend tests | `tests/test_blueprint_genesis.py` (NEW) | 1h |
+
+### Frontend Tasks
+
+| # | Task | File | Effort |
+|---|------|------|--------|
+| F1 | Add "Initialize Blueprint" button | `components/ide/header.tsx` (MODIFY) | 30m |
+| F2 | Create BlueprintInitModal | `components/blueprint/init-modal.tsx` (NEW) | 2h |
+| F3 | Add API client method | `lib/api-client.ts` (MODIFY) | 30m |
+| F4 | Write frontend tests | `__tests__/blueprint-init.test.tsx` (NEW) | 1h |
+
+### Integration Tasks
+
+| # | Task | Description | Effort |
+|---|------|-------------|--------|
+| I1 | E2E test: steel thread flow | Init → Edit → Verify → Push | 2h |
+| I2 | Manual QA with real GitHub repo | Verify genesis + CI runs | 1h |
+
+**Total: ~12 hours**
+
+---
+
+## Appendix D: Cleanup Strategy
+
+### Phase 1 Backend Cleanup
+
+| File | Action |
+|------|--------|
+| `api/projects.py` | DELETE (replaced by blueprints) |
+| `api/services/project_service.py` | RENAME → `blueprint_service.py` |
+| `core/gateway.py` LLM transpilation | REMOVE (replaced by VC generator) |
+| All `project_id` references | RENAME → `blueprint_id` |
+
+### Phase 1 Frontend Cleanup
+
+| File | Action |
+|------|--------|
+| `lib/project-context.tsx` | RENAME → `blueprint-context.tsx` |
+| `components/ide/project-explorer.tsx` | RENAME → `blueprint-navigator.tsx` |
+| All `projectId` props/params | RENAME → `blueprintId` |
+
+### Database Cleanup
+
+```sql
+-- Run AFTER migration verification
+ALTER TABLE projects RENAME TO blueprints;
+ALTER TABLE blueprints RENAME COLUMN project_id TO blueprint_id;
+-- Update all FK references
+```
+
+---
+
+## Appendix E: Testing Plan
+
+### Unit Tests (Backend)
+
+```python
+# tests/test_blueprint_genesis.py
+def test_genesis_creates_all_files(): ...
+def test_genesis_includes_github_action(): ...
+def test_genesis_fails_on_non_empty_repo(): ...
+def test_genesis_returns_commit_sha(): ...
+```
+
+### Unit Tests (Frontend)
+
+```typescript
+// __tests__/blueprint-init.test.tsx
+test('shows repo selector')
+test('calls API on submit')
+test('shows success with GitHub link')
+test('handles API errors')
+```
+
+### E2E Test
+
+```typescript
+// e2e/steel-thread.spec.ts
+test('complete flow: init → edit → verify → push', async () => {
+  // 1. Click "Initialize Blueprint"
+  // 2. Select test repo
+  // 3. Verify genesis commit in GitHub
+  // 4. Add claim file
+  // 5. Run verification
+  // 6. Push to GitHub
+  // 7. Verify GitHub Action runs
+});
+```
