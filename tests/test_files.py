@@ -418,3 +418,81 @@ class TestFileList:
         finally:
             test_db.delete(file)
             test_db.commit()
+
+
+class TestProjectStructureRefresh:
+    """Tests for project structure endpoint reflecting file changes."""
+    
+    def test_project_structure_reflects_new_files(self, client, test_project, test_db):
+        """Verify that project structure endpoint returns newly created files immediately."""
+        # Get initial project structure
+        initial_response = client.get(
+            f"/api/projects/{test_project.project_id}/structure",
+            headers={"X-API-Key": "dev_key_1"}
+        )
+        assert initial_response.status_code == 200
+        initial_data = initial_response.json()
+        initial_file_count = len(initial_data["files"])
+        
+        # Create a new markdown file via API
+        create_md_response = client.post(
+            "/api/files/save",
+            headers={"X-API-Key": "dev_key_1"},
+            json={
+                "project_id": str(test_project.project_id),
+                "filename": "new_file.md",
+                "content": "# New File",
+                "file_type": "md"
+            }
+        )
+        assert create_md_response.status_code == 200
+        md_file_id = create_md_response.json()["file_id"]
+        
+        # Get updated project structure
+        updated_response = client.get(
+            f"/api/projects/{test_project.project_id}/structure",
+            headers={"X-API-Key": "dev_key_1"}
+        )
+        assert updated_response.status_code == 200
+        updated_data = updated_response.json()
+        
+        # Verify the new file appears in the structure
+        assert len(updated_data["files"]) == initial_file_count + 1
+        new_file = next((f for f in updated_data["files"] if f["file_id"] == md_file_id), None)
+        assert new_file is not None
+        assert new_file["filename"] == "new_file.md"
+        assert new_file["file_type"] == "md"
+        
+        # Create a new Dafny file
+        create_dfy_response = client.post(
+            "/api/files/save",
+            headers={"X-API-Key": "dev_key_1"},
+            json={
+                "project_id": str(test_project.project_id),
+                "filename": "spec.dfy",
+                "content": "method Test() {}",
+                "file_type": "dfy"
+            }
+        )
+        assert create_dfy_response.status_code == 200
+        dfy_file_id = create_dfy_response.json()["file_id"]
+        
+        # Get updated project structure again
+        final_response = client.get(
+            f"/api/projects/{test_project.project_id}/structure",
+            headers={"X-API-Key": "dev_key_1"}
+        )
+        assert final_response.status_code == 200
+        final_data = final_response.json()
+        
+        # Verify both new files appear in the structure
+        assert len(final_data["files"]) == initial_file_count + 2
+        dfy_file = next((f for f in final_data["files"] if f["file_id"] == dfy_file_id), None)
+        assert dfy_file is not None
+        assert dfy_file["filename"] == "spec.dfy"
+        assert dfy_file["file_type"] == "dfy"
+        
+        # Cleanup
+        client.delete(f"/api/files/{md_file_id}", headers={"X-API-Key": "dev_key_1"})
+        client.delete(f"/api/files/{dfy_file_id}", headers={"X-API-Key": "dev_key_1"})
+

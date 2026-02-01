@@ -1,254 +1,192 @@
-# Guardian Gateway Architecture
+# InspecThor Architecture Documentation
 
-## System Overview
+> **Last Updated:** 2026-02-01  
+> **Version:** 2.0 (Consolidated)
 
-Guardian Gateway is a formal verification IDE that transforms English requirements into verified Dafny specifications. The system is split into two separate repositories:
+---
 
-- **Backend**: `guardian-gateway` - Python FastAPI server with core verification logic
-- **Frontend**: `v0-guardian-gateway-ide` - Next.js web application with modern IDE interface
+## 1. System Overview
+
+InspecThor (formerly Guardian Gateway) is a formal verification IDE that transforms English requirements into verified Dafny specifications. The system is split into two services:
+
+- **Backend**: `inspecthor-ide-backend` - Python FastAPI server with core verification logic
+- **Frontend**: `inspecthor-ide-frontend` - Next.js web application with modern IDE interface
 
 ```mermaid
 graph TB
-    User[User] --\u003e Frontend[Next.js Frontend]
-    Frontend --\u003e|HTTPS + API Key| Backend[FastAPI Backend]
-    Backend --\u003e Gemini[Google Gemini API]
-    Backend --\u003e Dafny[Dafny Verifier]
+    User[User] --> Frontend[Next.js Frontend]
+    Frontend -->|HTTPS + API Key| Backend[FastAPI Backend]
+    Backend --> Gemini[Google Gemini API]
+    Backend --> Dafny[Dafny Verifier]
     
-    subgraph "Frontend Repository"
-        Frontend
+    subgraph "Frontend"
         UI[shadcn/ui Components]
         APIClient[API Client]
     end
     
-    subgraph "Backend Repository"
-        Backend
-        Workflow[core_workflow.py]
-        Auditor[core_auditor.py]
-        Gateway[core_gateway.py]
-        Parser[core_parser.py]
+    subgraph "Backend"
+        Auditor[core/auditor.py]
+        Gateway[core/gateway.py]
+        Parser[core/parser.py]
+        Verifier[verifier/runner.py]
     end
 ```
 
-## Backend Components
+---
+
+## 2. Core Philosophy: Proof-Driven Development (PDD)
+
+We invert the typical development pyramid. Instead of writing code then testing, we write the **Specification** and **Refine** it into code.
+
+### Hierarchy of Truth
+
+| Source | Role | Authority | Function |
+|--------|------|-----------|----------|
+| **Dafny Spec** | The Law | Highest (Hard Constraint) | Correctness, input validation, edge cases |
+| **English Spec** | The Guide | Medium (Soft Context) | Variable naming, readability, business intent |
+
+---
+
+## 3. Backend Components
 
 ### Core Modules
 
-#### `core_workflow.py`
-- **Triage**: Classifies input documents (spec, code, junk)
-- **Structuring**: Organizes requirements into structured format
-- Orchestrates the specification generation pipeline
-
-#### `core_auditor.py`
-- Analyzes specifications using Google Gemini
-- Generates Dafny skeleton code
-- Identifies gaps and ambiguities
-- Creates traceability matrix
-
-#### `core_gateway.py`
-- Interfaces with Dafny verifier
-- Executes verification checks
-- Parses verification results
-
-#### `core_parser.py`
-- Parses various input formats
-- Extracts requirements from documents
+| Module | Location | Purpose |
+|--------|----------|---------|
+| **Spec Auditor** | `core/auditor.py` | LLM-powered gap detection, Dafny skeleton generation |
+| **Code Gateway** | `core/gateway.py` | Python→Dafny transpilation via Gemini |
+| **Parser** | `core/parser.py` | Input format parsing |
+| **Workflow** | `core/workflow.py` | Pipeline orchestration |
+| **Dafny Runner** | `verifier/runner.py` | Dafny CLI execution with Z3 solver |
 
 ### API Layer
 
-#### `api/main.py`
-FastAPI application with endpoints:
-- `GET /api/health` - Health check (public)
-- `POST /api/generate/spec` - Generate Dafny from English (authenticated)
-- `POST /api/assistant/chat` - AI debugging assistant (authenticated)
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/health` | GET | Health check (public) |
+| `/api/generate/spec` | POST | Generate Dafny from English |
+| `/api/generate/find-gaps` | POST | Find gaps without code gen |
+| `/api/generate/refine-spec` | POST | Apply gap suggestions |
+| `/api/verify` | POST | Run Dafny verification |
+| `/api/files/*` | CRUD | File management |
+| `/api/projects/*` | CRUD | Project management |
 
-#### `api/middleware.py`
-Security middleware:
-- **APIKeyMiddleware**: Validates X-API-Key header
-- **RateLimitMiddleware**: Limits requests per IP
-- **RequestLoggingMiddleware**: Logs all requests
+### Database Schema
 
-#### `api/models.py`
-Pydantic models for request/response validation
+Key tables: `users`, `projects`, `files`, `spec_dafny_links`, `unit_links`, `anchors`, `proof_receipts`
 
-## Frontend Components
+---
 
-### Pages
+## 4. Frontend Components
 
-#### `app/page.tsx`
-Main IDE interface with:
-- Project explorer sidebar
-- Markdown editor for requirements
-- Dafny code editor
-- Verification results panel
-- Gemini Insight panel
-- Terminal output
+### IDE Layout
 
-### Components
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **Project Explorer** | `components/ide/project-explorer.tsx` | File tree navigation |
+| **Markdown Editor** | `components/ide/markdown-editor.tsx` | Requirements authoring |
+| **Code Editor** | `components/ide/code-editor.tsx` | Dafny code viewing |
+| **Verification Panel** | `components/ide/verification-panel.tsx` | Proof obligations |
+| **Traceability View** | `components/ide/traceability-view.tsx` | Spec↔Code mapping |
+| **Gemini Panel** | `components/ide/gemini-insight-panel.tsx` | AI assistant |
 
-#### `components/ide/`
-- `header.tsx` - Top navigation and actions
-- `project-explorer.tsx` - File tree sidebar
-- `markdown-editor.tsx` - Requirements editor
-- `code-editor.tsx` - Dafny code viewer
-- `verification-panel.tsx` - Verification results
-- `gemini-insight-panel.tsx` - AI assistant chat
-- `terminal-panel.tsx` - Command output
+---
 
-#### `components/ui/`
-shadcn/ui primitives (buttons, dialogs, tabs, etc.)
+## 5. Security Architecture
 
-### API Integration
+### The Immutable Contract Policy
 
-#### `lib/api-client.ts`
-TypeScript client for backend communication:
-- Type-safe API calls
-- Automatic authentication (API key in headers)
-- Error handling and retry logic
-- Request/response type definitions
+**Golden Rule:** The AI Agent responsible for writing code must have **READ-ONLY** access to the Dafny Specification. It must **NEVER** modify it.
 
-## Security Architecture
+### Cryptographic Enforcement
 
-### Authentication Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Frontend
-    participant Middleware
-    participant Backend
-    
-    User-\u003e\u003eFrontend: Enter requirements
-    Frontend-\u003e\u003eMiddleware: POST /api/generate/spec<br/>X-API-Key: xxx
-    Middleware-\u003e\u003eMiddleware: Validate API key
-    Middleware-\u003e\u003eMiddleware: Check rate limit
-    Middleware-\u003e\u003eBackend: Forward request
-    Backend-\u003e\u003eFrontend: Return spec
-    Frontend-\u003e\u003eUser: Display results
-```
+1. **Phase 1 (Design):** Spec Auditor generates `interface.dfy`, system calculates SHA256 hash (Hash_A)
+2. **Phase 2 (Build):** Coder Agent writes `implementation.py`
+3. **Phase 3 (Verify):** Guardian re-calculates hash (Hash_B)
+   - If `Hash_A != Hash_B`: **SECURITY LOCKDOWN** - Agent tampered with contract
 
 ### Security Layers
 
-1. **HTTPS/TLS**: All production traffic encrypted
-2. **API Key Authentication**: X-API-Key header required
-3. **CORS**: Whitelist of allowed frontend origins
-4. **Rate Limiting**: Per-IP request limits
-5. **Request Logging**: Audit trail of all API calls
+| Layer | Implementation |
+|-------|----------------|
+| HTTPS/TLS | All production traffic encrypted |
+| API Key Auth | `X-API-Key` header required |
+| CORS | Whitelist of allowed origins |
+| Rate Limiting | Per-IP request limits |
+| Request Logging | Audit trail of all API calls |
 
-## Deployment Architecture
+---
 
-### Development
+## 6. Production Vision
+
+### Three Pillars
+
+1. **Spec Studio** - Collaborative web dashboard for architects
+2. **Guardian Bot** - GitHub/GitLab CI/CD gatekeeper
+3. **Trust Registry** - Immutable ledger of verified deployments
+
+### The Invisible Workflow
 
 ```
-┌─────────────────┐         ┌─────────────────┐
-│  Frontend       │         │  Backend        │
-│  localhost:3000 │ ◀─────\u003e │  localhost:8000 │
-│  (npm run dev)  │  HTTP   │  (uvicorn)      │
-└─────────────────┘         └─────────────────┘
+Define → Code → Verify → Deploy
 ```
 
-### Production
+Only signed, verified artifacts reach production.
 
-```
-┌─────────────────┐         ┌─────────────────┐
-│  Frontend       │         │  Backend        │
-│  Vercel         │ ◀─────\u003e │  Railway/Render │
-│  (HTTPS)        │  HTTPS  │  (HTTPS)        │
-└─────────────────┘         └─────────────────┘
-```
+---
 
-**Recommended Platforms**:
-- Frontend: Vercel (automatic HTTPS, edge deployment)
-- Backend: Railway, Render, or Google Cloud Run (automatic HTTPS)
-
-## API Contracts
-
-### Generate Spec Endpoint
-
-**Request**:
-```typescript
-POST /api/generate/spec
-Headers: X-API-Key: <key>
-Body: {
-  english_spec: string
-}
-```
-
-**Response**:
-```typescript
-{
-  triage: {
-    doc_type: string,
-    confidence: number
-  },
-  structured_spec: string,
-  dafny_skeleton: string,
-  gaps: Array<{
-    severity: string,
-    description: string,
-    location: string
-  }>,
-  ambiguities: string[],
-  traceability_matrix: Array<{
-    id: string,
-    source_text: string,
-    code_line: string,
-    status: string
-  }>
-}
-```
-
-### Chat Endpoint
-
-**Request**:
-```typescript
-POST /api/assistant/chat
-Headers: X-API-Key: <key>
-Body: {
-  message: string,
-  context?: string
-}
-```
-
-**Response**:
-```typescript
-{
-  content: string,
-  suggestions: string[]
-}
-```
-
-## Data Flow
-
-1. **User Input**: User writes requirements in markdown editor
-2. **API Request**: Frontend sends English spec to backend
-3. **Triage**: Backend classifies document type
-4. **Structure**: Backend organizes requirements
-5. **Audit**: Gemini analyzes spec and generates Dafny
-6. **Response**: Backend returns structured data
-7. **Display**: Frontend renders Dafny code and analysis
-8. **Verification** (future): User triggers Dafny verification
-9. **Debugging** (future): AI assistant helps resolve issues
-
-## Technology Stack
+## 7. Technology Stack
 
 ### Backend
-- **Framework**: FastAPI (Python)
-- **AI**: Google Gemini API
-- **Verification**: Dafny CLI
-- **Server**: Uvicorn (ASGI)
-- **Validation**: Pydantic
+- **Framework:** FastAPI (Python 3.11+)
+- **AI:** Google Gemini API
+- **Verification:** Dafny CLI with Z3 solver
+- **Database:** PostgreSQL with SQLAlchemy ORM
+- **Server:** Uvicorn (ASGI)
 
 ### Frontend
-- **Framework**: Next.js 16 (React 19)
-- **Language**: TypeScript
-- **UI**: shadcn/ui (Radix UI + Tailwind CSS)
-- **State**: React hooks
-- **API**: Native fetch with custom client
+- **Framework:** Next.js 16 (React 19)
+- **Language:** TypeScript
+- **UI:** shadcn/ui (Radix UI + Tailwind CSS)
+- **State:** React Context + hooks
 
-## Future Enhancements
+---
 
-1. **GitHub Integration**: OAuth login, PR creation, repo sync
-2. **Real-time Collaboration**: WebSocket for multi-user editing
-3. **CI/CD Integration**: GitHub App for automated verification
-4. **Advanced Verification**: Live Dafny checking in editor
-5. **Template Library**: Pre-built specification templates
+## 8. Gap Analysis Reference
+
+For detailed gap analysis and tactical roadmap for NASA-grade pivot, see:
+
+📄 **[Gap Analysis & Tactical Roadmap](../../.gemini/antigravity/brain/1de79347-e311-4c70-9ea5-73e01d80cbae/gap_analysis_roadmap.md)**
+
+Key findings:
+- 49+ files use "Project" nomenclature (should be "Blueprint")
+- Verification is probabilistic (LLM-based), not deterministic
+- Trust Registry schema exists but lacks immutability
+- UI needs Blueprint/Proof split-view canvas
+
+---
+
+## Appendix: Specification Template
+
+### Feature Specification Structure
+
+```markdown
+# [Feature Name] Specification
+
+## 1. Logic Model (State)
+- **Entities:** [e.g., User, Wallet]
+- **Variables:** [e.g., User.Balance: Integer]
+- **Invariants:** [What must NEVER be false?]
+
+## 2. Capabilities (Functional Core)
+### Function: [Name]
+- **Inputs:** [Name: Type]
+- **Preconditions:** [What must be true BEFORE?]
+- **Postconditions:** [What is guaranteed AFTER?]
+- **Edge Cases:** [Special handling]
+
+## 3. Imperative Shell (Unverified I/O)
+- **Reads:** [External data sources]
+- **Writes:** [External state changes]
+- **Side Effects:** [Notifications, logs]
+```
