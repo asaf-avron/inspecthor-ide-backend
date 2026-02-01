@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import uuid
+import json
 from typing import Optional, List, Tuple, Literal, cast
 
 from sqlalchemy.orm import Session
@@ -15,7 +16,7 @@ from fastapi import HTTPException
 
 from core.workflow import run_triage, run_structuring, TriageResult, StructureResult
 from core.auditor import SpecAuditor, GapReport
-from api.database import File as DBFile, UnitLink as DBUnitLink, Project as DBProject
+from api.database import File as DBFile, UnitLink as DBUnitLink, Project as DBProject, SpecDafnyLink as DBSpecDafnyLink
 from api.deconstruct import UnitIdentifier, extract_content_by_lines, create_unit_filename
 from api.files import get_project_owner_filter, hash_api_key
 from api.models import (
@@ -111,6 +112,17 @@ class SpecGeneratorService:
                 structure_result.structured_spec,
                 audit_result,
                 suggested_filename or request.current_filename or "spec",
+                api_key
+            )
+        
+        # Stage 5: Persist Dafny and metadata (if not deconstructed into units)
+        if request.project_id and request.source_file_id and not units_created:
+            self._persist_dafny_and_metadata(
+                request.project_id,
+                request.source_file_id,
+                audit_result.dafny_skeleton,
+                enhanced_traceability,
+                statistics,
                 api_key
             )
         
@@ -387,7 +399,157 @@ Filename:"""
         except Exception as e:
             logger.warning(f"Filename suggestion failed: {e}")
             return None
-    
+
+
+    def _persist_dafny_and_metadata(
+        self,
+        project_id: str,
+        source_file_id: str,
+        dafny_skeleton: str,
+        traceability_matrix: List[TraceabilityEntry],
+        statistics: SpecStatistics,
+        api_key: str
+    ) -> Optional[str]:
+        """
+        Create a separate .dfy file and link it to the source .md file.
+        Also save metadata (traceability, statistics) to the source file.
+        
+        Args:
+            project_id: Project ID
+            source_file_id: Source .md file ID
+            dafny_skeleton: Generated Dafny code
+            traceability_matrix: Traceability data
+            statistics: Spec statistics
+            api_key: API key for authentication
+            
+        Returns:
+            Dafny file ID if created, None otherwise
+        """
+        try:
+            from datetime import datetime
+            
+            # Verify project ownership
+            api_key_hash_value = hash_api_key(api_key) if api_key else None
+            owner_filter = get_project_owner_filter(self.current_user, api_key_hash_value)
+            
+            # Convert UUID strings to objects
+            try:
+                project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+                source_file_id_uuid = uuid.UUID(source_file_id) if isinstance(source_file_id, str) else source_file_id
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid UUID format: project_id={project_id}, source_file_id={source_file_id}")
+                return None
+            
+            # Verify project exists and user has access
+            project = self.db.query(DBProject).filter(
+                DBProject.project_id == project_id_uuid,
+                owner_filter
+            ).first()
+            
+            if not project:
+                logger.warning(f"Project {project_id} not found or unauthorized")
+                return None
+            
+            # Load source file
+            source_file = self.db.query(DBFile).filter(
+                DBFile.file_id == source_file_id_uuid,
+                DBFile.project_id == project_id_uuid
+            ).first()
+            
+            if not source_file or source_file.file_type != 'md':
+                logger.warning(f"Source file {source_file_id} not found or not a markdown file")
+                return None
+            
+            # Create .dfy filename from .md filename
+            source_filename = str(source_file.filename)
+            if source_filename.endswith('.md'):
+                dafny_filename = source_filename[:-3] + '.dfy'
+            else:
+                dafny_filename = source_filename + '.dfy'
+            
+            # Check if .dfy file already exists
+            existing_dafny = self.db.query(DBFile).filter(
+                DBFile.project_id == project_id_uuid,
+                DBFile.filename == dafny_filename
+            ).first()
+            
+            if existing_dafny:
+                # Update existing .dfy file
+                existing_dafny.content = dafny_skeleton  # type: ignore[assignment]
+                existing_dafny.size_bytes = len(dafny_skeleton.encode('utf-8'))  # type: ignore[assignment]
+                existing_dafny.updated_at = datetime.utcnow()  # type: ignore[assignment]
+                dafny_file_id = existing_dafny.file_id
+                logger.info(f"Updated existing .dfy file: {dafny_filename}")
+            else:
+                # Create new .dfy file
+                dafny_file_uuid = uuid.uuid4()
+                dafny_file = DBFile(
+                    file_id=dafny_file_uuid,
+                    project_id=project_id_uuid,
+                    filename=dafny_filename,
+                    content=dafny_skeleton,
+                    file_type='dfy',
+                    size_bytes=len(dafny_skeleton.encode('utf-8'))
+                )
+                self.db.add(dafny_file)
+                dafny_file_id = dafny_file_uuid
+                logger.info(f"Created new .dfy file: {dafny_filename}")
+            
+            # Create or update SpecDafnyLink
+            existing_link = self.db.query(DBSpecDafnyLink).filter(
+                DBSpecDafnyLink.spec_file_id == source_file_id_uuid
+            ).first()
+            
+            if existing_link:
+                # Update existing link to point to new/updated dafny file
+                existing_link.dafny_file_id = dafny_file_id  # type: ignore[assignment]
+            else:
+                # Create new link
+                link = DBSpecDafnyLink(
+                    link_id=uuid.uuid4(),
+                    spec_file_id=source_file_id_uuid,
+                    dafny_file_id=dafny_file_id
+                )
+                self.db.add(link)
+            
+            # Prepare metadata
+            metadata = {
+                "traceability_matrix": [
+                    {
+                        "id": entry.id,
+                        "source_text": entry.source_text,
+                        "code_line": entry.code_line,
+                        "line_number": entry.line_number,
+                        "status": entry.status,
+                        "confidence": entry.confidence
+                    }
+                    for entry in traceability_matrix
+                ],
+                "statistics": {
+                    "total_requirements": statistics.total_requirements,
+                    "mapped_requirements": statistics.mapped_requirements,
+                    "coverage_percentage": statistics.coverage_percentage,
+                    "total_gaps": statistics.total_gaps,
+                    "critical_gaps": statistics.critical_gaps
+                }
+            }
+            
+            # Update source file metadata
+            source_file.file_metadata = json.dumps(metadata)  # type: ignore[assignment]
+            source_file.updated_at = datetime.utcnow()  # type: ignore[assignment]
+            
+            # Commit all changes
+            self.db.commit()
+            
+            logger.info(f"Persisted Dafny file and metadata for {source_filename}")
+            return str(dafny_file_id)
+            
+        except Exception as e:
+            logger.error(f"Failed to persist Dafny and metadata: {e}")
+            self.db.rollback()
+            return None
+
+
     def _deconstruct_units(
         self,
         project_id: str,

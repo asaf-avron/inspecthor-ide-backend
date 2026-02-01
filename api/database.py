@@ -167,6 +167,8 @@ class File(Base):
         nullable=False
     )
     renamed = Column(Boolean, nullable=False, default=False)  # Track if file was manually renamed
+    file_metadata = Column(Text, nullable=True)  # JSON metadata (traceability, statistics, etc.)
+    size_bytes = Column(Integer, nullable=True)  # File size in bytes
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime,
@@ -198,10 +200,55 @@ class File(Base):
         back_populates="dafny_file"
     )
     
+    # Spec-Dafny links relationships
+    spec_dafny_links_as_spec = relationship(
+        "SpecDafnyLink",
+        foreign_keys="[SpecDafnyLink.spec_file_id]",
+        cascade="all, delete-orphan",
+        back_populates="spec_file"
+    )
+    spec_dafny_links_as_dafny = relationship(
+        "SpecDafnyLink",
+        foreign_keys="[SpecDafnyLink.dafny_file_id]",
+        cascade="all, delete-orphan",
+        back_populates="dafny_file"
+    )
+    
     # Unique constraint: filename is unique per project
     __table_args__ = (
         Index('ix_files_project_id_filename', project_id, filename, unique=True),
     )
+
+
+class SpecDafnyLink(Base):
+    """
+    Links a specification file (.md) to its generated Dafny file (.dfy).
+    Used for non-unit specs to maintain the relationship between spec and formal code.
+    """
+    __tablename__ = 'spec_dafny_links'
+    
+    link_id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+    spec_file_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('files.file_id', ondelete='CASCADE'),
+        nullable=False,
+        index=True
+    )
+    dafny_file_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('files.file_id', ondelete='CASCADE'),
+        nullable=False,
+        index=True
+    )
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    
+    # Relationships
+    spec_file = relationship("File", foreign_keys=[spec_file_id], back_populates="spec_dafny_links_as_spec")
+    dafny_file = relationship("File", foreign_keys=[dafny_file_id], back_populates="spec_dafny_links_as_dafny")
 
 
 class UnitLink(Base):
