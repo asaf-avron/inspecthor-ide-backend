@@ -7,7 +7,7 @@ import base64
 import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from github import Github, GithubIntegration, Auth
+from github import Github, GithubIntegration, Auth, InputGitTreeElement
 from github.Repository import Repository
 from pydantic import BaseModel
 
@@ -314,17 +314,19 @@ class GitHubStatelessClient:
         """
         repository = self._get_repo(installation_id, owner, repo)
         
-        # Create tree elements
+        # Create tree elements using InputGitTreeElement
         tree_elements = []
         for item in tree:
-            tree_elements.append({
-                "path": item["path"],
-                "mode": item.get("mode", "100644"),
-                "type": "blob",
-                "content": item["content"]
-            })
+            tree_elements.append(
+                InputGitTreeElement(
+                    path=item["path"],
+                    mode=item.get("mode", "100644"),
+                    type="blob",
+                    content=item["content"]
+                )
+            )
         
-        new_tree = repository.create_git_tree(tree_elements, base_tree)  # type: ignore[arg-type]
+        new_tree = repository.create_git_tree(tree_elements, base_tree)
         
         return {
             "sha": new_tree.sha,
