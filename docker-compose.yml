@@ -15,7 +15,7 @@ services:
     image: guardian-verifier:latest
     container_name: guardian-verifier
     ports:
-      - "127.0.0.1:8001:8001"  # Internal only - not exposed to internet
+      - "127.0.0.1:8001:8001" # Internal only - not exposed to internet
     networks:
       - internal
     # SECURITY: No environment variables with credentials
@@ -23,7 +23,7 @@ services:
     # SECURITY: Read-only root filesystem
     read_only: true
     tmpfs:
-      - /tmp:size=100M  # Temp files for Dafny verification
+      - /tmp:size=100M # Temp files for Dafny verification
     deploy:
       resources:
         limits:
@@ -33,7 +33,7 @@ services:
           cpus: '0.5'
           memory: 512M
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8001/health" ]
       interval: 30s
       timeout: 10s
       start_period: 15s
@@ -67,12 +67,12 @@ services:
     image: guardian-gateway-api:latest
     container_name: guardian-api
     ports:
-      - "127.0.0.1:8000:8000"  # Bind to localhost only - prevents internet scanners
+      - "127.0.0.1:8000:8000" # Bind to localhost only - prevents internet scanners
     environment:
       # Database connection
       # Use SQLite for persistence (or PostgreSQL: postgresql://guardian:${DB_PASSWORD:-guardian_dev_password}@db:5432/guardian_gateway)
       DATABASE_URL: ${DATABASE_URL:-sqlite:///./guardian_gateway.db}
-      
+
       # Persist data across restarts (set to true to reset on restart)
       DROP_EXISTING_TABLES: ${DROP_EXISTING_TABLES:-false}
 
@@ -109,14 +109,13 @@ services:
     volumes:
       - .:/app
       # Explicit SQLite database persistence - ensures database file persists across container restarts
-      - ./guardian_gateway.db:/app/guardian_gateway.db
+      # - ./guardian_gateway.db:/app/guardian_gateway.db
     depends_on:
       db:
         condition: service_healthy
       verifier:
         condition: service_healthy
     restart: unless-stopped
-
   # Frontend IDE Service - DISABLED (runs locally for faster HMR)
   # To run frontend: cd ../v0-guardian-gateway-ide && pnpm run dev
   # frontend:
@@ -144,7 +143,7 @@ networks:
     # Internal network for service-to-service communication
     # Verifier is isolated to this network only
     driver: bridge
-    internal: true  # No external access
+    internal: true # No external access
   default:
     # Default network with external access
     driver: bridge
