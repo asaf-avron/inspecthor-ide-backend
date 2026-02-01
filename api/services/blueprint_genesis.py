@@ -222,13 +222,13 @@ jobs:
             True if repo is safe to initialize
         """
         try:
-            default_branch = self.client.get_default_branch(
+            default_branch = await self.client.get_default_branch(
                 installation_id=installation_id,
                 owner=owner,
                 repo=repo
             )
             
-            tree = self.client.get_tree(
+            tree = await self.client.get_tree(
                 installation_id=installation_id,
                 owner=owner,
                 repo=repo,
@@ -300,7 +300,7 @@ jobs:
         files_created = list(genesis_files.keys())
         
         # Step 3: Get default branch and current HEAD
-        default_branch = self.client.get_default_branch(
+        default_branch = await self.client.get_default_branch(
             installation_id=installation_id,
             owner=owner,
             repo=repo
