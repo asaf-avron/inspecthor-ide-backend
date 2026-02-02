@@ -131,7 +131,7 @@ async def initialize_blueprint(
     
     # Create database record (using existing Project model for now)
     # TODO: Phase 1 will rename Project to Blueprint
-    blueprint_id = str(uuid4())
+    blueprint_id = uuid4()
     
     project = Project(
         project_id=blueprint_id,
@@ -139,13 +139,25 @@ async def initialize_blueprint(
         description=f"Blueprint initialized from {request.repository_url}",
         user_id=current_user.user_id if current_user else None,
     )
+    
+    if request.force and current_user:
+        # If force is True, delete any existing project with the same name for this user
+        existing_project = db.query(Project).filter(
+            Project.user_id == current_user.user_id,
+            Project.name == request.name
+        ).first()
+        if existing_project:
+            logger.warning(f"Force init: removing existing project {existing_project.project_id}")
+            db.delete(existing_project)
+            db.commit()
+
     db.add(project)
     db.commit()
     
     logger.info(f"Blueprint created: {blueprint_id} for {owner}/{repo}")
     
     return BlueprintInitResponse(
-        blueprint_id=blueprint_id,
+        blueprint_id=str(blueprint_id),
         name=request.name,
         repository_url=request.repository_url,
         commit_sha=result.commit_sha,
