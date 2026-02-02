@@ -24,13 +24,13 @@ jobs:
         pip install -r api/requirements.txt
         pip install pytest pytest-cov mypy ruff httpx
         
-    - name: 🛡️ Phase 1: Static Shield (Linting)
+    - name: Phase 1 - Static Shield (Linting)
       run: ruff check api/
       
-    - name: 🛡️ Phase 1: Static Shield (Types)
+    - name: Phase 1 - Static Shield (Types)
       # We ignore missing imports to ensure the build is fast and focuses on OUR code errors
       run: mypy api/ core/ --ignore-missing-imports --check-untyped-defs
       
-    - name: 🕸️ Phase 2: Integration Net
+    - name: Phase 2 - Integration Net
       # Run the test suite. If this fails, the code is rejected.
       run: pytest tests/
