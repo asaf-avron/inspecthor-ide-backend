@@ -44,6 +44,8 @@ from api import projects
 from api import auth
 from api.auth import get_current_user
 from api.github import webhooks as github_webhooks
+from api.github import installations as github_installations
+from api import blueprints
 from api.services.spec_generator import SpecGeneratorService
 from sqlalchemy.orm import Session
 
@@ -129,6 +131,8 @@ app.include_router(verification.router)
 app.include_router(deconstruct.router)
 app.include_router(projects.router)
 app.include_router(github_webhooks.router)
+app.include_router(github_installations.router)  # GitHub Installations API
+app.include_router(blueprints.router)  # Blueprint Genesis API
 
 
 @app.get("/api/health", response_model=HealthResponse)

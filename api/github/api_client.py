@@ -7,7 +7,7 @@ import base64
 import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from github import Github, GithubIntegration, Auth
+from github import Github, GithubIntegration, Auth, InputGitTreeElement
 from github.Repository import Repository
 from pydantic import BaseModel
 
@@ -70,16 +70,22 @@ class GitHubStatelessClient:
         Get installation access token (cached).
         Tokens expire after 1 hour, so we cache them.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         now = datetime.utcnow()
         
-        # Check cache
+        # Check cache - use same token for all calls in a session
         if installation_id in self._token_cache:
             token, expires_at = self._token_cache[installation_id]
             if now < expires_at - timedelta(minutes=5):  # Refresh 5 min before expiry
+                logger.info(f"Using cached token for installation {installation_id}")
                 return token
         
         # Get new token
+        logger.info(f"Getting fresh token for installation {installation_id}")
         token = self.integration.get_access_token(installation_id).token
+        logger.info(f"Got token: {token[:15]}...")
         expires_at = now + timedelta(hours=1)
         self._token_cache[installation_id] = (token, expires_at)
         
@@ -312,23 +318,49 @@ class GitHubStatelessClient:
         Returns:
             Dict with new tree SHA
         """
-        repository = self._get_repo(installation_id, owner, repo)
+        import logging
+        import requests
+        logger = logging.getLogger(__name__)
         
-        # Create tree elements
-        tree_elements = []
+        # Get fresh token for this specific operation
+        token = self._get_installation_token(installation_id)
+        
+        # Build tree elements for API call
+        tree_elements_json = []
         for item in tree:
-            tree_elements.append({
+            tree_elements_json.append({
                 "path": item["path"],
                 "mode": item.get("mode", "100644"),
                 "type": "blob",
                 "content": item["content"]
             })
         
-        new_tree = repository.create_git_tree(tree_elements, base_tree)  # type: ignore[arg-type]
+        # Build request body
+        body = {"tree": tree_elements_json}
+        if base_tree:
+            body["base_tree"] = base_tree
         
+        logger.info(f"Creating tree with {len(tree_elements_json)} elements, base_tree={base_tree}")
+        
+        # Use direct API call instead of PyGithub (PyGithub has token caching issues)
+        resp = requests.post(
+            f"https://api.github.com/repos/{owner}/{repo}/git/trees",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28"
+            },
+            json=body
+        )
+        
+        if resp.status_code != 201:
+            logger.error(f"create_tree failed: {resp.status_code} {resp.text[:200]}")
+            raise Exception(f"Failed to create tree: {resp.status_code} {resp.text}")
+        
+        result = resp.json()
         return {
-            "sha": new_tree.sha,
-            "url": new_tree.url
+            "sha": result["sha"],
+            "url": result["url"]
         }
     
     async def create_commit(
@@ -351,19 +383,42 @@ class GitHubStatelessClient:
         Returns:
             Dict with new commit SHA
         """
-        repository = self._get_repo(installation_id, owner, repo)
+        import logging
+        import requests
+        logger = logging.getLogger(__name__)
         
-        parent_commits = [repository.get_git_commit(sha) for sha in parents]
-        commit = repository.create_git_commit(
-            message=message,
-            tree=repository.get_git_tree(tree),
-            parents=parent_commits
+        # Get fresh token for this specific operation
+        token = self._get_installation_token(installation_id)
+        
+        # Build request body
+        body = {
+            "message": message,
+            "tree": tree,
+            "parents": parents
+        }
+        
+        logger.info(f"Creating commit with tree={tree}, parents={parents}")
+        
+        # Use direct API call instead of PyGithub
+        resp = requests.post(
+            f"https://api.github.com/repos/{owner}/{repo}/git/commits",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28"
+            },
+            json=body
         )
         
+        if resp.status_code != 201:
+            logger.error(f"create_commit failed: {resp.status_code} {resp.text[:200]}")
+            raise Exception(f"Failed to create commit: {resp.status_code} {resp.text}")
+        
+        result = resp.json()
         return {
-            "sha": commit.sha,
-            "url": commit.url,
-            "message": commit.message
+            "sha": result["sha"],
+            "url": result["url"],
+            "message": result["message"]
         }
     
     async def create_ref(
@@ -384,15 +439,37 @@ class GitHubStatelessClient:
         Returns:
             Dict with ref metadata
         """
-        repository = self._get_repo(installation_id, owner, repo)
-        git_ref = repository.create_git_ref(ref=ref, sha=sha)
+        import logging
+        import requests
+        logger = logging.getLogger(__name__)
         
+        # Get fresh token for this specific operation
+        token = self._get_installation_token(installation_id)
+        
+        logger.info(f"Creating ref={ref} pointing to {sha}")
+        
+        # Use direct API call instead of PyGithub
+        resp = requests.post(
+            f"https://api.github.com/repos/{owner}/{repo}/git/refs",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28"
+            },
+            json={"ref": ref, "sha": sha}
+        )
+        
+        if resp.status_code != 201:
+            logger.error(f"create_ref failed: {resp.status_code} {resp.text[:200]}")
+            raise Exception(f"Failed to create ref: {resp.status_code} {resp.text}")
+        
+        result = resp.json()
         return {
-            "ref": git_ref.ref,
-            "url": git_ref.url,
+            "ref": result["ref"],
+            "url": result["url"],
             "object": {
-                "sha": git_ref.object.sha,
-                "type": git_ref.object.type
+                "sha": result["object"]["sha"],
+                "type": result["object"]["type"]
             }
         }
     

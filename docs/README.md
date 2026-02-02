@@ -28,15 +28,16 @@ All specifications are verified in CI via Docker-based verification service (no 
 The following documentation covers components that are **not** formally verified:
 
 ### Core Documentation
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture, components, and API contracts
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Consolidated architecture, design philosophy, security, and roadmap
 - **[SECURITY.md](SECURITY.md)** - Security practices, authentication, and deployment
 
-### Architecture & Design
-- **[architecture/](architecture/)** - High-level design documents
-  - `Guardian_02_Architecture_HLD.md` - Architecture high-level design
-  - `Guardian_03_Methodology_Dafny.md` - Dafny methodology
-  - `Guardian_09_Security_Integrity.md` - Security and integrity
-  - `Guardian_10_Production_Roadmap.md` - Production roadmap
+### Architecture
+The `architecture/` subfolder has been consolidated into `ARCHITECTURE.md`. Contents include:
+- High-level system design
+- Proof-Driven Development methodology
+- Security and integrity (Immutable Contract Policy)
+- Production vision (Three Pillars)
+- Specification template appendix
 
 ### Development & Integration
 - **[development/](development/)** - Development guides and integration docs
@@ -52,16 +53,17 @@ The following documentation covers components that are **not** formally verified
   - `GITHUB_APP_LOCALHOST_SETUP.md` - GitHub app localhost setup
 
 ### Specifications (Implementation Specs)
-- **[specs/dev/](specs/dev/)** - Development specifications (not formally verified)
-  - **[implemented/](specs/dev/implemented/)** - Implemented feature specs
+- **[specs/](specs/)** - Feature specifications for NASA-grade pivot
+  - **`Spec_Steel_Thread_Master.md`** - **MASTER SPEC** - Takes precedence over all others
+  - `Spec_Blueprint_Nomenclature_Refactor.md` - Phase 1: Project→Blueprint rename
+  - `Spec_Verification_Condition_Generator.md` - Phase 2: Deterministic VC generation
+  - `Spec_Trust_Registry.md` - Phase 3: Immutable proof ledger
+  - `Spec_Architects_Canvas_UI.md` - Phase 2-3: Split-view Blueprint/Proof UI
+  - `Spec_Dafny_Domain_Preludes.md` - Phase 2: Banking/Healthcare/Auth modules
+- **[specs/dev/](specs/dev/)** - Legacy development specifications
   - `Dev_Spec_Deconstruct_To_Units.md` - Unit deconstruction spec
   - `Dev_Spec_File_Operations.md` - File operations spec
   - `Dev_Spec_Project_Management.md` - Project management spec
-
-### Templates
-- **[templates/](templates/)** - Specification templates
-  - `Guardian_07_Spec_Template.md` - Specification template
-  - `Template_Architects_Canvas.md` - Architect's canvas template
 
 ### Reference Materials
 - **[knowledge/](knowledge/)** - Reference materials
