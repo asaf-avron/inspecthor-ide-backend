@@ -9,9 +9,9 @@ These tests cover the file CRUD operations including:
 - Delete file
 
 Special focus on error cases that were previously missed:
-- Saving to non-existent project
-- Saving to project owned by another user
-- Operating on files in projects you don't own
+- Saving to non-existent blueprint
+- Saving to blueprint owned by another user
+- Operating on files in blueprints you don't own
 """
 
 import pytest
@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 import uuid
 
 from api.main import app
-from api.database import get_db, hash_api_key, Project, File
+from api.database import get_db, hash_api_key, Blueprint, File
 
 
 @pytest.fixture
@@ -37,51 +37,51 @@ def test_db():
 
 
 @pytest.fixture
-def test_project(test_db):
-    """Create a test project owned by dev_key_1."""
-    project = Project(
-        project_id=uuid.uuid4(),
-        name="Test Project for Files",
+def test_blueprint(test_db):
+    """Create a test blueprint owned by dev_key_1."""
+    blueprint = Blueprint(
+        blueprint_id=uuid.uuid4(),
+        name="Test Blueprint for Files",
         description="Testing file operations",
         api_key_hash=hash_api_key("dev_key_1")
     )
-    test_db.add(project)
+    test_db.add(blueprint)
     test_db.commit()
-    test_db.refresh(project)
-    yield project
+    test_db.refresh(blueprint)
+    yield blueprint
     # Cleanup
-    test_db.delete(project)
+    test_db.delete(blueprint)
     test_db.commit()
 
 
 @pytest.fixture
-def other_user_project(test_db):
-    """Create a test project owned by a different user."""
-    project = Project(
-        project_id=uuid.uuid4(),
-        name="Other User Project",
+def other_user_blueprint(test_db):
+    """Create a test blueprint owned by a different user."""
+    blueprint = Blueprint(
+        blueprint_id=uuid.uuid4(),
+        name="Other User Blueprint",
         description="Owned by someone else",
         api_key_hash=hash_api_key("other_user_key")
     )
-    test_db.add(project)
+    test_db.add(blueprint)
     test_db.commit()
-    test_db.refresh(project)
-    yield project
+    test_db.refresh(blueprint)
+    yield blueprint
     # Cleanup
-    test_db.delete(project)
+    test_db.delete(blueprint)
     test_db.commit()
 
 
 class TestFileSave:
     """Tests for POST /api/files/save endpoint."""
     
-    def test_save_file_success(self, client, test_project):
-        """Successfully save a file to an owned project."""
+    def test_save_file_success(self, client, test_blueprint):
+        """Successfully save a file to an owned blueprint."""
         response = client.post(
             "/api/files/save",
             headers={"X-API-Key": "dev_key_1"},
             json={
-                "project_id": str(test_project.project_id),
+                "blueprint_id": str(test_blueprint.blueprint_id),
                 "filename": "test.md",
                 "content": "# Test Content",
                 "file_type": "md"
@@ -92,14 +92,14 @@ class TestFileSave:
         assert data["filename"] == "test.md"
         assert "file_id" in data
     
-    def test_save_file_nonexistent_project(self, client):
-        """Saving to non-existent project should return 404."""
-        fake_project_id = str(uuid.uuid4())
+    def test_save_file_nonexistent_blueprint(self, client):
+        """Saving to non-existent blueprint should return 404."""
+        fake_blueprint_id = str(uuid.uuid4())
         response = client.post(
             "/api/files/save",
             headers={"X-API-Key": "dev_key_1"},
             json={
-                "project_id": fake_project_id,
+                "blueprint_id": fake_blueprint_id,
                 "filename": "test.md",
                 "content": "# Test",
                 "file_type": "md"
@@ -108,28 +108,28 @@ class TestFileSave:
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
     
-    def test_save_file_wrong_owner(self, client, other_user_project):
-        """Saving to project owned by another user should return 404 (project not visible)."""
+    def test_save_file_wrong_owner(self, client, other_user_blueprint):
+        """Saving to blueprint owned by another user should return 404 (blueprint not visible)."""
         response = client.post(
             "/api/files/save",
             headers={"X-API-Key": "dev_key_1"},  # Not the owner
             json={
-                "project_id": str(other_user_project.project_id),
+                "blueprint_id": str(other_user_blueprint.blueprint_id),
                 "filename": "test.md",
                 "content": "# Test",
                 "file_type": "md"
             }
         )
-        # Returns 404 because project is not visible to this user
+        # Returns 404 because blueprint is not visible to this user
         assert response.status_code == 404
     
-    def test_save_file_empty_filename(self, client, test_project):
+    def test_save_file_empty_filename(self, client, test_blueprint):
         """Saving with empty filename should fail validation."""
         response = client.post(
             "/api/files/save",
             headers={"X-API-Key": "dev_key_1"},
             json={
-                "project_id": str(test_project.project_id),
+                "blueprint_id": str(test_blueprint.blueprint_id),
                 "filename": "",
                 "content": "# Test",
                 "file_type": "md"
@@ -138,12 +138,12 @@ class TestFileSave:
         # icontract precondition on Shell should catch this
         assert response.status_code in [400, 500]  # Either validation error or precondition
     
-    def test_save_file_duplicate_filename(self, client, test_project, test_db):
-        """Saving with duplicate filename in same project should fail."""
+    def test_save_file_duplicate_filename(self, client, test_blueprint, test_db):
+        """Saving with duplicate filename in same blueprint should fail."""
         # First, create a file
         existing_file = File(
             file_id=uuid.uuid4(),
-            project_id=test_project.project_id,
+            blueprint_id=test_blueprint.blueprint_id,
             filename="existing.md",
             content="# Existing",
             file_type="md"
@@ -156,7 +156,7 @@ class TestFileSave:
                 "/api/files/save",
                 headers={"X-API-Key": "dev_key_1"},
                 json={
-                    "project_id": str(test_project.project_id),
+                    "blueprint_id": str(test_blueprint.blueprint_id),
                     "filename": "existing.md",  # Duplicate
                     "content": "# Test",
                     "file_type": "md"
@@ -171,11 +171,11 @@ class TestFileSave:
 class TestFileGet:
     """Tests for GET /api/files/{file_id} endpoint."""
     
-    def test_get_file_success(self, client, test_project, test_db):
+    def test_get_file_success(self, client, test_blueprint, test_db):
         """Successfully get a file."""
         file = File(
             file_id=uuid.uuid4(),
-            project_id=test_project.project_id,
+            blueprint_id=test_blueprint.blueprint_id,
             filename="getme.md",
             content="# Get Me",
             file_type="md"
@@ -205,11 +205,11 @@ class TestFileGet:
         )
         assert response.status_code == 404
     
-    def test_get_file_wrong_owner(self, client, other_user_project, test_db):
-        """Getting file from another user's project should return 404."""
+    def test_get_file_wrong_owner(self, client, other_user_blueprint, test_db):
+        """Getting file from another user's blueprint should return 404."""
         file = File(
             file_id=uuid.uuid4(),
-            project_id=other_user_project.project_id,
+            blueprint_id=other_user_blueprint.blueprint_id,
             filename="private.md",
             content="# Private",
             file_type="md"
@@ -231,11 +231,11 @@ class TestFileGet:
 class TestFileUpdate:
     """Tests for PUT /api/files/{file_id} endpoint."""
     
-    def test_update_file_success(self, client, test_project, test_db):
+    def test_update_file_success(self, client, test_blueprint, test_db):
         """Successfully update a file."""
         file = File(
             file_id=uuid.uuid4(),
-            project_id=test_project.project_id,
+            blueprint_id=test_blueprint.blueprint_id,
             filename="update.md",
             content="# Original",
             file_type="md"
@@ -266,11 +266,11 @@ class TestFileUpdate:
         )
         assert response.status_code == 404
     
-    def test_update_file_wrong_owner(self, client, other_user_project, test_db):
-        """Updating file from another user's project should return 403."""
+    def test_update_file_wrong_owner(self, client, other_user_blueprint, test_db):
+        """Updating file from another user's blueprint should return 403."""
         file = File(
             file_id=uuid.uuid4(),
-            project_id=other_user_project.project_id,
+            blueprint_id=other_user_blueprint.blueprint_id,
             filename="private.md",
             content="# Private",
             file_type="md"
@@ -293,11 +293,11 @@ class TestFileUpdate:
 class TestFileDelete:
     """Tests for DELETE /api/files/{file_id} endpoint."""
     
-    def test_delete_file_success(self, client, test_project, test_db):
+    def test_delete_file_success(self, client, test_blueprint, test_db):
         """Successfully delete a file."""
         file = File(
             file_id=uuid.uuid4(),
-            project_id=test_project.project_id,
+            blueprint_id=test_blueprint.blueprint_id,
             filename="deleteme.md",
             content="# Delete Me",
             file_type="md"
@@ -322,11 +322,11 @@ class TestFileDelete:
         )
         assert response.status_code == 404
     
-    def test_delete_file_wrong_owner(self, client, other_user_project, test_db):
-        """Deleting file from another user's project should return 403."""
+    def test_delete_file_wrong_owner(self, client, other_user_blueprint, test_db):
+        """Deleting file from another user's blueprint should return 403."""
         file = File(
             file_id=uuid.uuid4(),
-            project_id=other_user_project.project_id,
+            blueprint_id=other_user_blueprint.blueprint_id,
             filename="protected.md",
             content="# Protected",
             file_type="md"
@@ -350,10 +350,10 @@ class TestFileDelete:
 class TestFileList:
     """Tests for GET /api/files endpoint."""
     
-    def test_list_files_empty(self, client, test_project):
-        """List files when project has no files."""
+    def test_list_files_empty(self, client, test_blueprint):
+        """List files when blueprint has no files."""
         response = client.get(
-            f"/api/files?project_id={test_project.project_id}",
+            f"/api/files?blueprint_id={test_blueprint.blueprint_id}",
             headers={"X-API-Key": "dev_key_1"}
         )
         assert response.status_code == 200
@@ -361,18 +361,18 @@ class TestFileList:
         assert data["total"] == 0
         assert data["files"] == []
     
-    def test_list_files_with_files(self, client, test_project, test_db):
-        """List files when project has files."""
+    def test_list_files_with_files(self, client, test_blueprint, test_db):
+        """List files when blueprint has files."""
         file1 = File(
             file_id=uuid.uuid4(),
-            project_id=test_project.project_id,
+            blueprint_id=test_blueprint.blueprint_id,
             filename="file1.md",
             content="# File 1",
             file_type="md"
         )
         file2 = File(
             file_id=uuid.uuid4(),
-            project_id=test_project.project_id,
+            blueprint_id=test_blueprint.blueprint_id,
             filename="file2.dfy",
             content="method Test() {}",
             file_type="dfy"
@@ -383,7 +383,7 @@ class TestFileList:
         
         try:
             response = client.get(
-                f"/api/files?project_id={test_project.project_id}",
+                f"/api/files?blueprint_id={test_blueprint.blueprint_id}",
                 headers={"X-API-Key": "dev_key_1"}
             )
             assert response.status_code == 200
@@ -394,11 +394,11 @@ class TestFileList:
             test_db.delete(file2)
             test_db.commit()
     
-    def test_list_files_other_user_project(self, client, other_user_project, test_db):
-        """List files should not show files from other user's projects."""
+    def test_list_files_other_user_blueprint(self, client, other_user_blueprint, test_db):
+        """List files should not show files from other user's blueprints."""
         file = File(
             file_id=uuid.uuid4(),
-            project_id=other_user_project.project_id,
+            blueprint_id=other_user_blueprint.blueprint_id,
             filename="secret.md",
             content="# Secret",
             file_type="md"
@@ -408,7 +408,7 @@ class TestFileList:
         
         try:
             response = client.get(
-                f"/api/files?project_id={other_user_project.project_id}",
+                f"/api/files?blueprint_id={other_user_blueprint.blueprint_id}",
                 headers={"X-API-Key": "dev_key_1"}  # Wrong owner
             )
             assert response.status_code == 200
@@ -420,14 +420,14 @@ class TestFileList:
             test_db.commit()
 
 
-class TestProjectStructureRefresh:
-    """Tests for project structure endpoint reflecting file changes."""
+class TestBlueprintStructureRefresh:
+    """Tests for blueprint structure endpoint reflecting file changes."""
     
-    def test_project_structure_reflects_new_files(self, client, test_project, test_db):
-        """Verify that project structure endpoint returns newly created files immediately."""
-        # Get initial project structure
+    def test_blueprint_structure_reflects_new_files(self, client, test_blueprint, test_db):
+        """Verify that blueprint structure endpoint returns newly created files immediately."""
+        # Get initial blueprint structure
         initial_response = client.get(
-            f"/api/projects/{test_project.project_id}/structure",
+            f"/api/blueprints/{test_blueprint.blueprint_id}/structure",
             headers={"X-API-Key": "dev_key_1"}
         )
         assert initial_response.status_code == 200
@@ -439,7 +439,7 @@ class TestProjectStructureRefresh:
             "/api/files/save",
             headers={"X-API-Key": "dev_key_1"},
             json={
-                "project_id": str(test_project.project_id),
+                "blueprint_id": str(test_blueprint.blueprint_id),
                 "filename": "new_file.md",
                 "content": "# New File",
                 "file_type": "md"
@@ -448,9 +448,9 @@ class TestProjectStructureRefresh:
         assert create_md_response.status_code == 200
         md_file_id = create_md_response.json()["file_id"]
         
-        # Get updated project structure
+        # Get updated blueprint structure
         updated_response = client.get(
-            f"/api/projects/{test_project.project_id}/structure",
+            f"/api/blueprints/{test_blueprint.blueprint_id}/structure",
             headers={"X-API-Key": "dev_key_1"}
         )
         assert updated_response.status_code == 200
@@ -468,7 +468,7 @@ class TestProjectStructureRefresh:
             "/api/files/save",
             headers={"X-API-Key": "dev_key_1"},
             json={
-                "project_id": str(test_project.project_id),
+                "blueprint_id": str(test_blueprint.blueprint_id),
                 "filename": "spec.dfy",
                 "content": "method Test() {}",
                 "file_type": "dfy"
@@ -477,9 +477,9 @@ class TestProjectStructureRefresh:
         assert create_dfy_response.status_code == 200
         dfy_file_id = create_dfy_response.json()["file_id"]
         
-        # Get updated project structure again
+        # Get updated blueprint structure again
         final_response = client.get(
-            f"/api/projects/{test_project.project_id}/structure",
+            f"/api/blueprints/{test_blueprint.blueprint_id}/structure",
             headers={"X-API-Key": "dev_key_1"}
         )
         assert final_response.status_code == 200
@@ -495,4 +495,3 @@ class TestProjectStructureRefresh:
         # Cleanup
         client.delete(f"/api/files/{md_file_id}", headers={"X-API-Key": "dev_key_1"})
         client.delete(f"/api/files/{dfy_file_id}", headers={"X-API-Key": "dev_key_1"})
-
