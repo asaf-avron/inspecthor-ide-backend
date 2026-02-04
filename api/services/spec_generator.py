@@ -16,9 +16,9 @@ from fastapi import HTTPException
 
 from core.workflow import run_triage, run_structuring, TriageResult, StructureResult
 from core.auditor import SpecAuditor, GapReport
-from api.database import File as DBFile, UnitLink as DBUnitLink, Project as DBProject, SpecDafnyLink as DBSpecDafnyLink
+from api.database import File as DBFile, UnitLink as DBUnitLink, Blueprint as DBBlueprint, SpecDafnyLink as DBSpecDafnyLink
 from api.deconstruct import UnitIdentifier, extract_content_by_lines, create_unit_filename
-from api.files import get_project_owner_filter, hash_api_key
+from api.files import get_blueprint_owner_filter, hash_api_key
 from api.models import (
     GenerateSpecRequest,
     GenerateSpecResponse,
@@ -105,9 +105,9 @@ class SpecGeneratorService:
         units_created = None
         subfolder_name = None
         
-        if request.project_id and request.source_file_id:
+        if request.blueprint_id and request.source_file_id:
             units_created, subfolder_name = self._deconstruct_units(
-                request.project_id,
+                request.blueprint_id,
                 request.source_file_id,
                 structure_result.structured_spec,
                 audit_result,
@@ -116,9 +116,9 @@ class SpecGeneratorService:
             )
         
         # Stage 5: Persist Dafny and metadata (if not deconstructed into units)
-        if request.project_id and request.source_file_id and not units_created:
+        if request.blueprint_id and request.source_file_id and not units_created:
             self._persist_dafny_and_metadata(
-                request.project_id,
+                request.blueprint_id,
                 request.source_file_id,
                 audit_result.dafny_skeleton,
                 enhanced_traceability,
@@ -403,7 +403,7 @@ Filename:"""
 
     def _persist_dafny_and_metadata(
         self,
-        project_id: str,
+        blueprint_id: str,
         source_file_id: str,
         dafny_skeleton: str,
         traceability_matrix: List[TraceabilityEntry],
@@ -415,7 +415,7 @@ Filename:"""
         Also save metadata (traceability, statistics) to the source file.
         
         Args:
-            project_id: Project ID
+            blueprint_id: Blueprint ID
             source_file_id: Source .md file ID
             dafny_skeleton: Generated Dafny code
             traceability_matrix: Traceability data
@@ -428,32 +428,32 @@ Filename:"""
         try:
             from datetime import datetime
             
-            # Verify project ownership
+            # Verify blueprint ownership
             api_key_hash_value = hash_api_key(api_key) if api_key else None
-            owner_filter = get_project_owner_filter(self.current_user, api_key_hash_value)
+            owner_filter = get_blueprint_owner_filter(self.current_user, api_key_hash_value)
             
             # Convert UUID strings to objects
             try:
-                project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+                blueprint_id_uuid = uuid.UUID(blueprint_id) if isinstance(blueprint_id, str) else blueprint_id
                 source_file_id_uuid = uuid.UUID(source_file_id) if isinstance(source_file_id, str) else source_file_id
             except (ValueError, TypeError):
-                logger.warning(f"Invalid UUID format: project_id={project_id}, source_file_id={source_file_id}")
+                logger.warning(f"Invalid UUID format: blueprint_id={blueprint_id}, source_file_id={source_file_id}")
                 return None
             
-            # Verify project exists and user has access
-            project = self.db.query(DBProject).filter(
-                DBProject.project_id == project_id_uuid,
+            # Verify blueprint exists and user has access
+            blueprint = self.db.query(DBBlueprint).filter(
+                DBBlueprint.blueprint_id == blueprint_id_uuid,
                 owner_filter
             ).first()
             
-            if not project:
-                logger.warning(f"Project {project_id} not found or unauthorized")
+            if not blueprint:
+                logger.warning(f"Blueprint {blueprint_id} not found or unauthorized")
                 return None
             
             # Load source file
             source_file = self.db.query(DBFile).filter(
                 DBFile.file_id == source_file_id_uuid,
-                DBFile.project_id == project_id_uuid
+                DBFile.blueprint_id == blueprint_id_uuid
             ).first()
             
             if not source_file or source_file.file_type != 'md':
@@ -469,7 +469,7 @@ Filename:"""
             
             # Check if .dfy file already exists
             existing_dafny = self.db.query(DBFile).filter(
-                DBFile.project_id == project_id_uuid,
+                DBFile.blueprint_id == blueprint_id_uuid,
                 DBFile.filename == dafny_filename
             ).first()
             
@@ -485,7 +485,7 @@ Filename:"""
                 dafny_file_uuid = uuid.uuid4()
                 dafny_file = DBFile(
                     file_id=dafny_file_uuid,
-                    project_id=project_id_uuid,
+                    blueprint_id=blueprint_id_uuid,
                     filename=dafny_filename,
                     content=dafny_skeleton,
                     file_type='dfy',
@@ -552,7 +552,7 @@ Filename:"""
 
     def _deconstruct_units(
         self,
-        project_id: str,
+        blueprint_id: str,
         source_file_id: str,
         structured_spec: str,
         audit_result: GapReport,
@@ -563,7 +563,7 @@ Filename:"""
         Stage 4: Deconstruct specification into units if applicable.
         
         Args:
-            project_id: Project ID to save units to
+            blueprint_id: Blueprint ID to save units to
             source_file_id: Source file ID being deconstructed
             structured_spec: Structured specification text
             audit_result: Audit result with Dafny skeleton
@@ -574,31 +574,31 @@ Filename:"""
             Tuple of (units_created list, subfolder_name) or (None, None)
         """
         try:
-            # Verify project ownership
+            # Verify blueprint ownership
             api_key_hash_value = hash_api_key(api_key) if api_key else None
-            owner_filter = get_project_owner_filter(self.current_user, api_key_hash_value)
+            owner_filter = get_blueprint_owner_filter(self.current_user, api_key_hash_value)
             
             # Convert UUID strings to objects
             try:
-                project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+                blueprint_id_uuid = uuid.UUID(blueprint_id) if isinstance(blueprint_id, str) else blueprint_id
                 source_file_id_uuid = uuid.UUID(source_file_id) if isinstance(source_file_id, str) else source_file_id
             except (ValueError, TypeError):
-                logger.warning(f"Invalid UUID format: project_id={project_id}, source_file_id={source_file_id}")
+                logger.warning(f"Invalid UUID format: blueprint_id={blueprint_id}, source_file_id={source_file_id}")
                 return None, None
             
-            project = self.db.query(DBProject).filter(
-                DBProject.project_id == project_id_uuid,
+            blueprint = self.db.query(DBBlueprint).filter(
+                DBBlueprint.blueprint_id == blueprint_id_uuid,
                 owner_filter
             ).first()
             
-            if not project:
-                logger.warning(f"Project {project_id} not found or unauthorized for unit deconstruction")
+            if not blueprint:
+                logger.warning(f"Blueprint {blueprint_id} not found or unauthorized for unit deconstruction")
                 return None, None
             
             # Load source file
             source_file = self.db.query(DBFile).filter(
                 DBFile.file_id == source_file_id_uuid,
-                DBFile.project_id == project_id_uuid
+                DBFile.blueprint_id == blueprint_id_uuid
             ).first()
             
             if not source_file or source_file.file_type != 'md':
@@ -670,7 +670,7 @@ Filename:"""
                         unit_file_id = str(unit_file_uuid)
                         unit_file = DBFile(
                             file_id=unit_file_uuid,
-                            project_id=source_file.project_id,
+                            blueprint_id=source_file.blueprint_id,
                             filename=unit_filename,
                             content=unit_markdown,
                             file_type='unit',
@@ -683,7 +683,7 @@ Filename:"""
                         dafny_file_id = str(dafny_file_uuid)
                         dafny_file = DBFile(
                             file_id=dafny_file_uuid,
-                            project_id=source_file.project_id,
+                            blueprint_id=source_file.blueprint_id,
                             filename=dafny_filename,
                             content=dafny_code,
                             file_type='dfy',

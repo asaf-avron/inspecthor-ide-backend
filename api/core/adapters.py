@@ -10,22 +10,22 @@ from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session
 import uuid as uuid_module
 
-from api.database import Project as DBProject, File as DBFile
-from api.core.models import SystemState, Project, File, Owner, FileType
+from api.database import Blueprint as DBBlueprint, File as DBFile
+from api.core.models import SystemState, Blueprint, File, Owner, FileType
 
 
 def build_system_state(
-    projects: List[DBProject],
+    blueprints: List[DBBlueprint],
     files: List[DBFile]
 ) -> SystemState:
     """
     Build SystemState from SQLAlchemy ORM objects.
     
     This function safely converts mutable SQLAlchemy objects to immutable Core models.
-    It computes the file_ids sets for projects based on the files list.
+    It computes the file_ids sets for blueprints based on the files list.
     
     Args:
-        projects: List of SQLAlchemy Project objects
+        blueprints: List of SQLAlchemy Blueprint objects
         files: List of SQLAlchemy File objects
     
     Returns:
@@ -47,7 +47,7 @@ def build_system_state(
         
         file_obj = File(
             file_id=str(db_file.file_id),
-            project_id=str(db_file.project_id),
+            blueprint_id=str(db_file.blueprint_id),
             filename=str(db_file.filename),  # type: ignore[arg-type]
             content=str(db_file.content),  # type: ignore[arg-type]
             file_type=file_type,
@@ -56,63 +56,63 @@ def build_system_state(
         )
         files_map[str(db_file.file_id)] = file_obj
     
-    # Build projects map with file_ids sets computed from files
-    projects_map: Dict[str, Project] = {}
-    for db_project in projects:
+    # Build blueprints map with file_ids sets computed from files
+    blueprints_map: Dict[str, Blueprint] = {}
+    for db_blueprint in blueprints:
         # Determine owner
-        if db_project.user_id:
-            owner = Owner.authenticated(str(db_project.user_id))
-        elif db_project.api_key_hash:
-            owner = Owner.anonymous(str(db_project.api_key_hash))  # type: ignore[arg-type]
+        if db_blueprint.user_id:
+            owner = Owner.authenticated(str(db_blueprint.user_id))
+        elif db_blueprint.api_key_hash:
+            owner = Owner.anonymous(str(db_blueprint.api_key_hash))  # type: ignore[arg-type]
         else:
             # Should not happen, but handle gracefully
             owner = Owner.anonymous("")
         
-        # Compute file_ids set from files belonging to this project
+        # Compute file_ids set from files belonging to this blueprint
         file_ids = {
             str(f.file_id) for f in files
-            if str(f.project_id) == str(db_project.project_id)
+            if str(f.blueprint_id) == str(db_blueprint.blueprint_id)
         }
         
-        project_obj = Project(
-            project_id=str(db_project.project_id),
-            name=str(db_project.name),  # type: ignore[arg-type]
-            description=str(db_project.description) if db_project.description else "",  # type: ignore[arg-type]
+        blueprint_obj = Blueprint(
+            blueprint_id=str(db_blueprint.blueprint_id),
+            name=str(db_blueprint.name),  # type: ignore[arg-type]
+            description=str(db_blueprint.description) if db_blueprint.description else "",  # type: ignore[arg-type]
             owner=owner,
             file_ids=file_ids
         )
-        projects_map[str(db_project.project_id)] = project_obj
+        blueprints_map[str(db_blueprint.blueprint_id)] = blueprint_obj
     
-    state = SystemState(projects=projects_map, files=files_map)
+    state = SystemState(blueprints=blueprints_map, files=files_map)
     
     # Validate state invariants
     state.validate()
     
-    # Scope Contract: Ensure every file has a corresponding project
+    # Scope Contract: Ensure every file has a corresponding blueprint
     for file_id, file_obj in files_map.items():
-        if file_obj.project_id not in projects_map:
+        if file_obj.blueprint_id not in blueprints_map:
             raise ValueError(
-                f"Scope Contract violation: File {file_id} references project {file_obj.project_id} "
-                f"that is not in the projects list"
+                f"Scope Contract violation: File {file_id} references blueprint {file_obj.blueprint_id} "
+                f"that is not in the blueprints list"
             )
     
     return state
 
 
 def build_scoped_state(
-    project_id: Optional[str] = None,
+    blueprint_id: Optional[str] = None,
     owner_filter: Optional[Any] = None,
     db: Optional[Session] = None
 ) -> SystemState:
     """
     Build scoped SystemState for a specific operation (Oracle's Scope Contract).
     
-    When loading state for a specific operation (e.g., save_file(project_id=P)),
-    ensures Project P and ALL its files are loaded. This prevents uniqueness check
+    When loading state for a specific operation (e.g., save_file(blueprint_id=P)),
+    ensures Blueprint P and ALL its files are loaded. This prevents uniqueness check
     failures when only a partial state is loaded.
     
     Args:
-        project_id: Specific project ID to load (if None, loads all)
+        blueprint_id: Specific blueprint ID to load (if None, loads all)
         owner_filter: SQLAlchemy filter for ownership (if None, loads all)
         db: Database session
     
@@ -125,29 +125,29 @@ def build_scoped_state(
     if db is None:
         raise ValueError("Database session required for build_scoped_state")
     
-    # Load projects
-    query_projects = db.query(DBProject)
-    if project_id:
+    # Load blueprints
+    query_blueprints = db.query(DBBlueprint)
+    if blueprint_id:
         # Convert string to UUID if needed
         try:
-            project_uuid = uuid_module.UUID(project_id) if isinstance(project_id, str) else project_id
-            query_projects = query_projects.filter(DBProject.project_id == project_uuid)
+            blueprint_uuid = uuid_module.UUID(blueprint_id) if isinstance(blueprint_id, str) else blueprint_id
+            query_blueprints = query_blueprints.filter(DBBlueprint.blueprint_id == blueprint_uuid)
         except ValueError:
             # Invalid UUID format
-            return SystemState(projects={}, files={})
+            return SystemState(blueprints={}, files={})
     if owner_filter is not None:
-        query_projects = query_projects.filter(owner_filter)
-    projects = query_projects.all()
+        query_blueprints = query_blueprints.filter(owner_filter)
+    blueprints = query_blueprints.all()
     
-    if not projects:
-        # Return empty state if no projects found
-        return SystemState(projects={}, files={})
+    if not blueprints:
+        # Return empty state if no blueprints found
+        return SystemState(blueprints={}, files={})
     
-    # Load ALL files for the projects in scope
-    project_uuids = [p.project_id for p in projects]  # Keep as UUID objects for DB query
-    files = db.query(DBFile).filter(DBFile.project_id.in_(project_uuids)).all()
+    # Load ALL files for the blueprints in scope
+    blueprint_uuids = [p.blueprint_id for p in blueprints]  # Keep as UUID objects for DB query
+    files = db.query(DBFile).filter(DBFile.blueprint_id.in_(blueprint_uuids)).all()
     
-    return build_system_state(projects, files)
+    return build_system_state(blueprints, files)
 
 
 def apply_state_diff(
@@ -175,6 +175,7 @@ def apply_state_diff(
         This function performs I/O operations (database writes).
         It should only be called from the Imperative Shell.
     """
+    print(f"DEBUG: apply_state_diff called. New files keys: {list(new_state.files.keys())}")
     # --- 1. DELETIONS (Children First) ---
     # Files first
     deleted_files = set(old_state.files.keys()) - set(new_state.files.keys())
@@ -182,22 +183,22 @@ def apply_state_diff(
         file_uuid = uuid_module.UUID(file_id) if isinstance(file_id, str) else file_id
         db.query(DBFile).filter(DBFile.file_id == file_uuid).delete()
     
-    # Projects second (parents)
-    deleted_projects = set(old_state.projects.keys()) - set(new_state.projects.keys())
-    for project_id in deleted_projects:
-        project_uuid = uuid_module.UUID(project_id) if isinstance(project_id, str) else project_id
-        db.query(DBProject).filter(DBProject.project_id == project_uuid).delete()
+    # Blueprints second (parents)
+    deleted_blueprints = set(old_state.blueprints.keys()) - set(new_state.blueprints.keys())
+    for blueprint_id in deleted_blueprints:
+        blueprint_uuid = uuid_module.UUID(blueprint_id) if isinstance(blueprint_id, str) else blueprint_id
+        db.query(DBBlueprint).filter(DBBlueprint.blueprint_id == blueprint_uuid).delete()
     
     # --- 2. CREATES & UPDATES ---
-    # Projects first (parents)
-    for project_id, new_proj in new_state.projects.items():
-        old_proj = old_state.projects.get(project_id)
+    # Blueprints first (parents)
+    for blueprint_id, new_proj in new_state.blueprints.items():
+        old_proj = old_state.blueprints.get(blueprint_id)
         
         if old_proj is None:
-            # CREATE: New project
-            project_uuid = uuid_module.UUID(project_id) if isinstance(project_id, str) else project_id
-            db_proj = DBProject(
-                project_id=project_uuid,
+            # CREATE: New blueprint
+            blueprint_uuid = uuid_module.UUID(blueprint_id) if isinstance(blueprint_id, str) else blueprint_id
+            db_proj = DBBlueprint(
+                blueprint_id=blueprint_uuid,
                 name=new_proj.name,
                 description=new_proj.description or None,
                 user_id=uuid_module.UUID(new_proj.owner.user_id) if new_proj.owner.is_authenticated() else None,
@@ -205,9 +206,9 @@ def apply_state_diff(
             )
             db.add(db_proj)
         elif new_proj != old_proj:
-            # UPDATE: Project changed
-            project_uuid = uuid_module.UUID(project_id) if isinstance(project_id, str) else project_id
-            db_proj = db.query(DBProject).filter(DBProject.project_id == project_uuid).first()  # type: ignore[assignment]
+            # UPDATE: Blueprint changed
+            blueprint_uuid = uuid_module.UUID(blueprint_id) if isinstance(blueprint_id, str) else blueprint_id
+            db_proj = db.query(DBBlueprint).filter(DBBlueprint.blueprint_id == blueprint_uuid).first()  # type: ignore[assignment]
             if db_proj:
                 # Update fields
                 db_proj.name = new_proj.name  # type: ignore[assignment]
@@ -225,13 +226,14 @@ def apply_state_diff(
     for file_id, new_file in new_state.files.items():
         old_file = old_state.files.get(file_id)
         file_uuid = uuid_module.UUID(file_id) if isinstance(file_id, str) else file_id
-        project_uuid = uuid_module.UUID(new_file.project_id) if isinstance(new_file.project_id, str) else new_file.project_id
+        blueprint_uuid = uuid_module.UUID(new_file.blueprint_id) if isinstance(new_file.blueprint_id, str) else new_file.blueprint_id
         
         if old_file is None:
+            print(f"DEBUG: Creating file {file_id} for blueprint {blueprint_uuid}")
             # CREATE: New file
             db_file = DBFile(
                 file_id=file_uuid,
-                project_id=project_uuid,
+                blueprint_id=blueprint_uuid,
                 filename=new_file.filename,
                 content=new_file.content,
                 file_type=new_file.file_type.value,

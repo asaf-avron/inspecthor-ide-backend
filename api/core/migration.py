@@ -9,7 +9,7 @@ See: api/verification/project_migration.dfy :: MigrateAnonymousProjects
 """
 
 import icontract
-from api.core.models import SystemState, Project, Owner
+from api.core.models import SystemState, Blueprint, Owner
 
 
 @icontract.require(
@@ -25,21 +25,21 @@ from api.core.models import SystemState, Project, Owner
 @icontract.ensure(
     lambda result, state, user_id, current_session_hash, OLD:
         result.validate() and
-        # All projects owned by session_hash now owned by user_id
+        # All blueprints owned by session_hash now owned by user_id
         all(
-            result.projects[pid].owner == Owner.authenticated(user_id)
-            for pid in result.projects
-            if pid in OLD.get_value(lambda: state.projects) and
-            OLD.get_value(lambda: state.projects[pid]).owner == Owner.anonymous(current_session_hash)
+            result.blueprints[pid].owner == Owner.authenticated(user_id)
+            for pid in result.blueprints
+            if pid in OLD.get_value(lambda: state.blueprints) and
+            OLD.get_value(lambda: state.blueprints[pid]).owner == Owner.anonymous(current_session_hash)
         ) and
-        # Projects not owned by session_hash remain unchanged
+        # Blueprints not owned by session_hash remain unchanged
         all(
-            result.projects[pid] == OLD.get_value(lambda: state.projects[pid])
-            for pid in result.projects
-            if pid in OLD.get_value(lambda: state.projects) and
-            OLD.get_value(lambda: state.projects[pid]).owner != Owner.anonymous(current_session_hash)
+            result.blueprints[pid] == OLD.get_value(lambda: state.blueprints[pid])
+            for pid in result.blueprints
+            if pid in OLD.get_value(lambda: state.blueprints) and
+            OLD.get_value(lambda: state.blueprints[pid]).owner != Owner.anonymous(current_session_hash)
         ),
-    "Postconditions: Valid state, migrated projects have new owner, other projects unchanged"
+    "Postconditions: Valid state, migrated blueprints have new owner, other blueprints unchanged"
 )
 def migrate_anonymous_projects(
     state: SystemState,
@@ -47,9 +47,9 @@ def migrate_anonymous_projects(
     current_session_hash: str
 ) -> SystemState:
     """
-    Migrate anonymous projects to authenticated user.
+    Migrate anonymous blueprints to authenticated user.
     
-    Pure function matching Dafny MigrateAnonymousProjects exactly.
+    Pure function matching Dafny MigrateAnonymousBlueprints exactly.
     Takes immutable state, returns new immutable state.
     No side effects, no database access.
     
@@ -62,37 +62,37 @@ def migrate_anonymous_projects(
         current_session_hash: API key hash of current session
     
     Returns:
-        New SystemState with migrated projects
+        New SystemState with migrated blueprints
     
     Security Property (Theorem_Isolation):
-        Projects NOT owned by current_session_hash are never modified.
+        Blueprints NOT owned by current_session_hash are never modified.
     """
-    # 1. Identify Candidate Projects (The 'Filter')
-    # Logic: Projects owned by THIS session hash
+    # 1. Identify Candidate Blueprints (The 'Filter')
+    # Logic: Blueprints owned by THIS session hash
     candidates = {
-        pid for pid, project in state.projects.items()
-        if project.owner == Owner.anonymous(current_session_hash)
+        pid for pid, blueprint in state.blueprints.items()
+        if blueprint.owner == Owner.anonymous(current_session_hash)
     }
     
     # 2. Transform State (The 'Map')
-    new_projects = {}
-    for pid, project in state.projects.items():
+    new_blueprints = {}
+    for pid, blueprint in state.blueprints.items():
         if pid in candidates:
             # TRANSITION: Anonymous -> Authenticated
-            new_project = Project(
-                project_id=project.project_id,
-                name=project.name,
-                description=project.description,
+            new_blueprint = Blueprint(
+                blueprint_id=blueprint.blueprint_id,
+                name=blueprint.name,
+                description=blueprint.description,
                 owner=Owner.authenticated(user_id),
-                file_ids=project.file_ids
+                file_ids=blueprint.file_ids
             )
-            new_projects[pid] = new_project
+            new_blueprints[pid] = new_blueprint
         else:
             # PRESERVE: Untouched
-            new_projects[pid] = project
+            new_blueprints[pid] = blueprint
     
     # 3. Return New State
-    new_state = SystemState(projects=new_projects, files=state.files)
+    new_state = SystemState(blueprints=new_blueprints, files=state.files)
     
     # Validate invariants
     new_state.validate()

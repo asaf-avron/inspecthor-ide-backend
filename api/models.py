@@ -62,7 +62,7 @@ class GenerateSpecRequest(BaseModel):
     english_spec: str
     options: Optional[GenerateSpecOptions] = None
     current_filename: Optional[str] = None  # Current filename for suggestion and subfolder naming
-    project_id: Optional[str] = None  # Project ID to save unit files to
+    blueprint_id: Optional[str] = None  # Blueprint ID to save unit files to
     source_file_id: Optional[str] = None  # Source file ID (if editing existing file)
 
 
@@ -121,7 +121,7 @@ class SuggestResponse(BaseModel):
 # === Spec Refinement Models ===
 class FindGapsRequest(BaseModel):
     spec: str
-    project_id: Optional[str] = None
+    blueprint_id: Optional[str] = None
     source_file_id: Optional[str] = None
 
 
@@ -170,7 +170,7 @@ class FileSaveRequest(BaseModel):
     filename: str
     content: str
     file_type: Literal["md", "dfy", "unit"]
-    project_id: str  # Required - files must belong to a project
+    blueprint_id: str  # Required - files must belong to a blueprint
 
 
 class FileSaveResponse(BaseModel):
@@ -190,7 +190,7 @@ class FileResponse(BaseModel):
     filename: str
     content: str
     file_type: str
-    project_id: str
+    blueprint_id: str
     created_at: str
     updated_at: str
     size_bytes: int
@@ -211,36 +211,43 @@ class FileListResponse(BaseModel):
     total: int
 
 
-# === Project Management Models ===
-class ProjectCreateRequest(BaseModel):
+# === Blueprint Management Models ===
+class BlueprintCreateRequest(BaseModel):
     name: str
     description: Optional[str] = None
 
 
-class ProjectUpdateRequest(BaseModel):
+class BlueprintUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
 
 
-class ProjectResponse(BaseModel):
-    project_id: str
+class BlueprintResponse(BaseModel):
+    blueprint_id: str
     name: str
     description: Optional[str]
     created_at: str
     updated_at: str
     file_count: int
     redirect_url: Optional[str] = None
+    # GitHub Integration
+    repository_url: Optional[str] = None
+    default_branch: str = "main"
+    # Brain Architecture (Task #2)
+    component_uuid: Optional[str] = None
+    registry_path: Optional[str] = None
+    sync_status: str = "clean"  # clean | dirty | verifying | error
 
 
-class ProjectListRequest(BaseModel):
+class BlueprintListRequest(BaseModel):
     limit: int = 100
     offset: int = 0
     sort: Literal["created_at", "updated_at", "name"] = "updated_at"
     order: Literal["asc", "desc"] = "desc"
 
 
-class ProjectListResponse(BaseModel):
-    projects: List[ProjectResponse]
+class BlueprintListResponse(BaseModel):
+    blueprints: List[BlueprintResponse]
     total: int
     limit: int
     offset: int
@@ -254,15 +261,32 @@ class FileMetadata(BaseModel):
     size_bytes: int
 
 
-class ProjectStructureResponse(BaseModel):
-    project: ProjectResponse
+class BlueprintStructureResponse(BaseModel):
+    blueprint: BlueprintResponse
     files: List[FileMetadata]
 
 
-class ProjectDeleteResponse(BaseModel):
+class BlueprintDeleteResponse(BaseModel):
     deleted: bool
-    project_id: str
+    blueprint_id: str
     files_deleted: int
+
+
+class BlueprintInitRequest(BaseModel):
+    owner: str
+    repo_name: str
+    installation_id: int
+    blueprint_name: str
+    description: Optional[str] = None
+
+
+class BlueprintInitResponse(BaseModel):
+    blueprint: BlueprintResponse
+    github_url: str
+    commit_sha: Optional[str] = None
+    files_created: List[str] = []
+    setup_status: Literal["success", "partial", "failed"]
+
 
 
 # === Verification Models (Enhanced) ===
@@ -354,7 +378,7 @@ class DeconstructStats(BaseModel):
 
 
 class DeconstructRequest(BaseModel):
-    project_id: str
+    blueprint_id: str
     source_file_id: str
     strategy: Literal["auto", "manual"] = "auto"
     max_units: Optional[int] = None

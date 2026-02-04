@@ -59,8 +59,8 @@ class User(Base):
     last_login_at = Column(DateTime, nullable=True)
     
     # Relationships
-    projects = relationship(
-        "Project",
+    blueprints = relationship(
+        "Blueprint",
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True
@@ -78,14 +78,15 @@ class User(Base):
     )
 
 
-class Project(Base):
+
+class Blueprint(Base):
     """
-    Represents a project grouping multiple files.
-    Projects can be owned by users (authenticated) or API keys (anonymous/legacy).
+    Represents a blueprint (formerly project) grouping multiple files.
+    Blueprints are backed by a GitHub repository and the Trusted Kernel Architecture.
     """
-    __tablename__ = 'projects'
+    __tablename__ = 'blueprints'
     
-    project_id = Column(
+    blueprint_id = Column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
@@ -93,6 +94,28 @@ class Project(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     
+    # GitHub Integration
+    repository_url = Column(String(512), nullable=True)
+    repository_owner = Column(String(255), nullable=True)
+    repository_name = Column(String(255), nullable=True)
+    installation_id = Column(Integer, nullable=True)
+    default_branch = Column(String(255), nullable=False, default='main')
+    last_synced_at = Column(DateTime, nullable=True)
+
+    # Brain Architecture - Component Tracking
+    component_uuid = Column(String(64), nullable=True, unique=True, index=True)  # UUID for component tracking
+    registry_path = Column(String(512), nullable=True)  # Path in .inspecthor/registry.yaml
+
+    # Synchronization State (for AI-Gapped Development)
+    sync_status = Column(
+        Enum('clean', 'dirty', 'verifying', 'error', name='sync_status_enum'),
+        nullable=False,
+        default='clean'
+    )
+    spec_hash = Column(String(71), nullable=True)  # SHA256 hash of spec.md (sha256:...)
+    dafny_hash = Column(String(71), nullable=True)  # SHA256 hash of core.dfy
+    last_harmonized = Column(DateTime, nullable=True)  # Last harmonization timestamp
+
     # Owner can be either a user or an API key (for backward compatibility)
     user_id = Column(
         UUID(as_uuid=True),
@@ -111,10 +134,10 @@ class Project(Base):
     )
     
     # Relationships
-    user = relationship("User", back_populates="projects")
+    user = relationship("User", back_populates="blueprints")
     files = relationship(
         "File",
-        back_populates="project",
+        back_populates="blueprint",
         cascade="all, delete-orphan",
         passive_deletes=True
     )
@@ -123,7 +146,7 @@ class Project(Base):
     __table_args__ = (
         # Unique constraint: name is unique per user
         Index(
-            'ix_projects_user_id_name_lower',
+            'ix_blueprints_user_id_name_lower',
             user_id,
             func.lower(name),
             unique=True,
@@ -131,15 +154,18 @@ class Project(Base):
         ),
         # Unique constraint: name is unique per API key (legacy)
         Index(
-            'ix_projects_api_key_hash_name_lower',
+            'ix_blueprints_api_key_hash_name_lower',
             api_key_hash,
             func.lower(name),
             unique=True,
             postgresql_where=Column('api_key_hash').isnot(None)
         ),
         # Index for sorting by updated_at
-        Index('ix_projects_updated_at', updated_at.desc()),
+        Index('ix_blueprints_updated_at', updated_at.desc()),
+        # Index for repository URL lookups
+        Index('ix_blueprints_repository_url', repository_url),
     )
+
 
 
 class File(Base):
@@ -154,9 +180,9 @@ class File(Base):
         primary_key=True,
         default=uuid.uuid4
     )
-    project_id = Column(
+    blueprint_id = Column(
         UUID(as_uuid=True),
-        ForeignKey('projects.project_id', ondelete='CASCADE'),
+        ForeignKey('blueprints.blueprint_id', ondelete='CASCADE'),
         nullable=False,
         index=True
     )
@@ -178,7 +204,7 @@ class File(Base):
     )
     
     # Relationships
-    project = relationship("Project", back_populates="files")
+    blueprint = relationship("Blueprint", back_populates="files")
     
     # Unit links relationships
     unit_links_as_root = relationship(
@@ -216,7 +242,7 @@ class File(Base):
     
     # Unique constraint: filename is unique per project
     __table_args__ = (
-        Index('ix_files_project_id_filename', project_id, filename, unique=True),
+        Index('ix_files_blueprint_id_filename', blueprint_id, filename, unique=True),
     )
 
 
@@ -370,10 +396,10 @@ class Repository(Base):
     full_name = Column(String(512), nullable=False)  # "owner/repo"
     default_branch = Column(String(255), nullable=False, default='main')
     
-    # InSpecThor project link
-    project_id = Column(
+    # InSpecThor blueprint link
+    blueprint_id = Column(
         UUID(as_uuid=True),
-        ForeignKey('projects.project_id', ondelete='SET NULL'),
+        ForeignKey('blueprints.blueprint_id', ondelete='SET NULL'),
         nullable=True
     )
     
@@ -399,7 +425,7 @@ class Repository(Base):
     
     # Relationships
     installation = relationship("Installation", back_populates="repositories")
-    project = relationship("Project")
+    blueprint = relationship("Blueprint")
     anchors = relationship(
         "Anchor",
         back_populates="repository",
@@ -427,10 +453,10 @@ class Anchor(Base):
         default=uuid.uuid4
     )
     
-    # Project link
-    project_id = Column(
+    # Blueprint link
+    blueprint_id = Column(
         UUID(as_uuid=True),
-        ForeignKey('projects.project_id', ondelete='CASCADE'),
+        ForeignKey('blueprints.blueprint_id', ondelete='CASCADE'),
         nullable=False
     )
     
@@ -477,7 +503,7 @@ class Anchor(Base):
     )
     
     # Relationships
-    project = relationship("Project")
+    blueprint = relationship("Blueprint")
     repository = relationship("Repository", back_populates="anchors")
     proof_receipts = relationship(
         "ProofReceipt",
@@ -487,7 +513,7 @@ class Anchor(Base):
     )
     
     __table_args__ = (
-        Index('ix_anchors_project_id', project_id),
+        Index('ix_anchors_blueprint_id', blueprint_id),
         Index('ix_anchors_repository_id', repository_id),
         Index('ix_anchors_spec_id', spec_id),
         Index('ix_anchors_verification_status', verification_status),
@@ -554,6 +580,58 @@ class ProofReceipt(Base):
         Index('ix_receipts_content_contract_hash', content_hash, contract_hash),
         Index('ix_receipts_status', status),
         Index('ix_receipts_expires_at', expires_at),
+    )
+
+
+class LedgerEntry(Base):
+    """
+    Represents a verification entry in the proof ledger.
+    Stores verification history for components in the database
+    (in addition to file-based storage in .inspecthor/proof_ledger/).
+    """
+    __tablename__ = 'ledger_entries'
+
+    entry_id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+
+    # Component link
+    component_uuid = Column(String(64), nullable=False, index=True)
+    blueprint_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('blueprints.blueprint_id', ondelete='CASCADE'),
+        nullable=True,
+        index=True
+    )
+
+    # Verification data
+    code_hash = Column(String(71), nullable=False)  # sha256:...
+    status = Column(
+        Enum('verified', 'failed', 'pending', 'timeout', 'error', name='ledger_status_enum'),
+        nullable=False
+    )
+    proof_obligations = Column(Text, nullable=True)  # JSON array
+    dafny_output = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    # Metadata
+    dafny_version = Column(String(50), nullable=True)
+    verification_time_ms = Column(Integer, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # Relationships
+    blueprint = relationship("Blueprint")
+
+    __table_args__ = (
+        Index('ix_ledger_component_uuid', component_uuid),
+        Index('ix_ledger_blueprint_id', blueprint_id),
+        Index('ix_ledger_status', status),
+        Index('ix_ledger_created_at', created_at.desc()),
+        Index('ix_ledger_component_created', component_uuid, created_at.desc()),
     )
 
 
