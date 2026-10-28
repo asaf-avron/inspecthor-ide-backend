@@ -63,22 +63,32 @@ You can only prove what you can isolate. Inspecthor keeps business logic in a **
 
 | Service | Path | Role |
 |---------|------|------|
-| **API** | [`api/`](api/) | FastAPI gateway on port 8000: auth, projects, files, spec generation, verification, GitHub App |
+| **API** | [`api/`](api/) | FastAPI gateway on port 8000: auth, blueprints, files, spec generation, verification, GitHub App, Brain (registry and proof ledger) |
 | **Core pipeline** | [`core/`](core/) | Spec Auditor, workflow and triage, Python-to-Dafny gateway, contract parser |
 | **Verifier** | [`verifier/`](verifier/) | Stateless Dafny + Z3 service on an internal-only Docker network, with no credentials and no database access |
-| **Database** | SQLite (default) or PostgreSQL | Users, projects, files, traceability links, proof receipts |
+| **Database** | SQLite (default) or PostgreSQL | Users, blueprints, files, traceability links, ledger entries |
 
 ## Key features
 
 | Feature | Status | Where |
 |---------|--------|-------|
 | **Spec Auditor**: finds ambiguities, missing edge cases and logic gaps in an English spec before any code is written | Available | `POST /api/generate/find-gaps`, [`core/auditor.py`](core/auditor.py) |
-| **Architect's Canvas**: structured blueprint templates (Logic Model, Capabilities, Imperative Shell), so nobody starts from a blank page | Available (blueprint initialization) | `POST /api/v1/blueprints/initialize`, [`api/services/blueprint_genesis.py`](api/services/blueprint_genesis.py) |
+| **Architect's Canvas**: structured blueprint templates (Logic Model, Capabilities, Imperative Shell), so nobody starts from a blank page. A blueprint is a project backed by a GitHub repository. | Available (blueprint creation and repository scaffolding). The split-view UI is planned. | `POST /api/blueprints`, `POST /api/blueprints/initialize`, [`api/services/blueprint_genesis.py`](api/services/blueprint_genesis.py) |
 | **Dual Translation**: English requirements become a Dafny contract, and code is mapped back onto that contract | Available | `POST /api/generate/spec`, [`api/verification/contract_translator.py`](api/verification/contract_translator.py) |
 | **The Judge**: Dafny + Z3 proves the implementation against the contract and reports any failed proof obligations | Available | `POST /api/verify`, [`verifier/runner.py`](verifier/runner.py) |
 | **Verification loop**: audit, refine, re-verify | Available with a person in the loop. The autonomous self-healing version is planned. | `POST /api/generate/refine-spec` |
 | **Traceability**: links each requirement to the code and the proof that covers it | Available | `GET /api/files/{id}/traceability`, `POST /api/deconstruct` |
 | **GitHub App**: webhooks and check runs that gate pull requests on verification | Available | [`api/github/`](api/github/) |
+| **Brain and Proof Ledger**: a `.inspecthor/` folder per repository with a component registry (stable UUIDs) and a signed, hash-chained verification history | Beta | `/api/brain/*`, [`api/brain/`](api/brain/) |
+| **Drift detection**: finds components that moved, went missing or were corrupted, and repairs the registry | Beta | `/api/drift/*`, [`api/services/drift_detector.py`](api/services/drift_detector.py) |
+| **Harmonization**: keeps the English spec, the Dafny contract and the code in sync, and tracks whether a blueprint is clean or dirty | Beta | `/api/harmonize/*`, [`api/services/harmonization_service.py`](api/services/harmonization_service.py) |
+| **Diagrams**: Mermaid diagrams of the intended flow (from the spec) and the actual flow (from the code), with a comparison | Beta | `/api/diagrams/*` |
+| **Component refinement**: complexity report and suggestions for splitting a spec into components | Beta | `/api/refinement/*` |
+| **Runtime verification**: generates tests from Dafny contracts and compares the call graph with the spec | Beta | `/api/runtime/*` |
+| **Iron Grip**: branch protection and required checks for GitHub repositories | Beta | `/api/iron-grip/*`, `/api/github/iron-grip/*` |
+| **TKA bootstrap**: initializes the Brain, registry and ledger for a new repository | Beta | `POST /api/tka/initialize` |
+
+**Beta** means the feature is implemented and covered by unit tests, but it has not been exercised end to end against real GitHub installations and Gemini. The IDE leaves its Proof Ledger and Component Health tabs off by default because they don't match these endpoints yet (see the [roadmap](#roadmap)).
 
 ### Formally verified components
 
@@ -86,8 +96,8 @@ Inspecthor verifies its own backend. Seven Dafny specifications run in CI on eve
 
 - **Database model**: core data structures and state invariants
 - **File operations**: create, update, delete
-- **Project management**: creation and cascade deletion
-- **Project migration**: moving an anonymous project to an authenticated user
+- **Blueprint management**: creation and cascade deletion (the spec file is still named `project_management.dfy`)
+- **Blueprint migration**: moving an anonymous blueprint to an authenticated user (`project_migration.dfy`)
 - **Crypto contract**: Fernet encryption and decryption of tokens at rest
 - **Spec generation**: partial
 - **Traceability**: partial
@@ -153,7 +163,8 @@ Then start the [frontend](https://github.com/asaf-avron/inspecthor-ide-frontend#
 ### 3. Test and verify
 
 ```bash
-pytest                                   # unit and integration tests
+pip install pytest pytest-asyncio httpx
+DATABASE_URL=sqlite:///./test.db pytest  # unit and integration tests, on SQLite
 ./scripts/verify_dafny.sh api/verification/models.dfy api/verification/file_operations.dfy
 docker-compose exec verifier dafny verify api/verification/models.dfy
 ```
@@ -168,11 +179,15 @@ CI also runs `ruff` and `mypy` ([quality gate](.github/workflows/quality_gate.ym
 | Generate | `/api/generate` | `spec`, `find-gaps`, `refine-spec` |
 | Assistant | `/api/assistant/chat` | Gemini help for debugging failed proofs |
 | Verify | `/api/verify` | Run Dafny on a contract and implementation |
-| Projects and files | `/api/projects`, `/api/files` | CRUD and project structure |
+| Blueprints and files | `/api/blueprints`, `/api/files` | CRUD, structure, and repository initialization |
 | Traceability | `/api/deconstruct`, `/api/files/{id}/traceability` | Requirement-to-proof links |
-| Blueprints | `/api/v1/blueprints` | Architect's Canvas initialization |
 | Auth | `/api/auth` | GitHub OAuth, refresh, logout, current user |
 | GitHub | `/api/github` | Webhooks and App installations |
+| Brain | `/api/brain` | Registry, proof ledger, integrity checks |
+| Drift and harmonization | `/api/drift`, `/api/harmonize` | Detect and repair drift, sync spec, contract and code |
+| Diagrams and refinement | `/api/diagrams`, `/api/refinement` | Mermaid diagrams, complexity analysis |
+| Runtime | `/api/runtime` | Test generation, call-graph comparison |
+| Iron Grip and TKA | `/api/iron-grip`, `/api/tka` | Branch protection, repository bootstrap |
 
 The full schema is at `/docs` while the server is running.
 
@@ -187,11 +202,12 @@ The full schema is at `/docs` while the server is running.
 
 - [ ] **Autonomous self-healing loop**: when a proof fails, the agent repairs the code against the counterexample and re-verifies until the proof passes, without changing the contract. The stub is `auto_refine_spec` in [`core/workflow.py`](core/workflow.py).
 - [ ] **Ephemeral sandboxes on Nomad**: a disposable sandbox per verification run for untrusted code, replacing today's shared verifier container.
-- [ ] **Gemini 3 Pro Auditor**: move gap analysis to the newest reasoning model. Today it uses Gemini 2.0 Flash and 1.5 Pro.
+- [ ] **Gemini 3 Pro Auditor**: move gap analysis to the newest reasoning model. Today it uses Gemini 2.0 Flash, 1.5 Flash and 1.5 Pro.
 - [ ] **Architect's Canvas UI**: a split view with the blueprint on one side and proof status on the other. Spec: [Spec_Architects_Canvas_UI.md](docs/specs/Spec_Architects_Canvas_UI.md)
 - [ ] **Deterministic VC generation**: verification conditions generated from the contract rather than by an LLM. Spec: [Spec_Verification_Condition_Generator.md](docs/specs/Spec_Verification_Condition_Generator.md)
-- [ ] **Contract hash enforcement**: pin each approved contract with a SHA-256 hash and fail the run if it changes during code generation.
-- [ ] **Trust Registry**: an append-only ledger of proof certificates for deployed code. Spec: [Spec_Trust_Registry.md](docs/specs/Spec_Trust_Registry.md)
+- [ ] **Contract hash enforcement**: the ledger already detects when code no longer matches its last verified hash (`POST /api/brain/integrity/check`). Next is pinning each approved contract and failing the run when it changes during code generation.
+- [ ] **Trust Registry**: extend the per-component proof ledger into an append-only registry of proof certificates for deployed code. Spec: [Spec_Trust_Registry.md](docs/specs/Spec_Trust_Registry.md)
+- [ ] **Connect the IDE panels**: the Proof Ledger, Component Health and Harmonization components in the frontend call `/api/ledger/*`, `/api/harmonization/*` and a few `/api/drift/*` routes that the backend exposes under `/api/brain/ledger/*` and `/api/harmonize/*` (or not at all). Align the two, then turn the panels on with `NEXT_PUBLIC_ENABLE_BRAIN_UI`.
 - [ ] **Domain preludes**: reusable Dafny modules for banking, healthcare and auth. Spec: [Spec_Dafny_Domain_Preludes.md](docs/specs/Spec_Dafny_Domain_Preludes.md)
 
 The master plan is [Spec_Steel_Thread_Master.md](docs/specs/Spec_Steel_Thread_Master.md).
