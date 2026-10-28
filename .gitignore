@@ -47,6 +47,12 @@ github-app-private-key.pem
 *.pem
 *.key
 
+
+# Local databases (may contain OAuth tokens and user data)
+*.db
+*.sqlite
+*.sqlite3
+
 # Accidental files (redirect output mistakes)
 =*
 
