@@ -1,4 +1,4 @@
-# Guardian Gateway - Core Parser
+# Inspecthor - Core Parser
 # Pure Python logic for parsing Dafny contracts
 # Functional Core: No UI framework imports in core
 

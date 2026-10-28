@@ -1,3 +1,3 @@
 """
-Guardian Gateway API Package
+Inspecthor API Package
 """

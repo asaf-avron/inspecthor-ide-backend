@@ -1,5 +1,5 @@
 """
-Guardian Gateway - FastAPI Backend
+Inspecthor - FastAPI Backend
 Main application entry point for the REST API
 """
 
@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Guardian Gateway API",
+    title="Inspecthor API",
     description="REST API for formal specification verification",
     version="1.0.0",
     lifespan=lifespan,

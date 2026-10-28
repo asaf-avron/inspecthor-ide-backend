@@ -1,6 +1,6 @@
-# Guardian Gateway - Backend Docker Compose
+# Inspecthor - Backend Docker Compose
 # Includes: Backend API, PostgreSQL Database, Dafny Verifier
-# Frontend runs locally via: cd ../v0-guardian-gateway-ide && pnpm run dev
+# Frontend runs locally via: cd ../inspecthor-ide-frontend && pnpm run dev
 # Run with: docker-compose up --build
 
 version: '3.8'
@@ -12,8 +12,8 @@ services:
     build:
       context: .
       dockerfile: verifier/Dockerfile
-    image: guardian-verifier:latest
-    container_name: guardian-verifier
+    image: inspecthor-verifier:latest
+    container_name: inspecthor-verifier
     ports:
       - "127.0.0.1:8001:8001" # Internal only - not exposed to internet
     networks:
@@ -43,17 +43,17 @@ services:
   # PostgreSQL Database
   db:
     image: postgres:16-alpine
-    container_name: guardian-db
+    container_name: inspecthor-db
     environment:
-      POSTGRES_DB: guardian_gateway
-      POSTGRES_USER: guardian
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-guardian_dev_password}
+      POSTGRES_DB: inspecthor
+      POSTGRES_USER: inspecthor
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-inspecthor_dev_password}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - inspecthor_postgres:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U guardian" ]
+      test: [ "CMD-SHELL", "pg_isready -U inspecthor" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -64,14 +64,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
-    image: guardian-gateway-api:latest
-    container_name: guardian-api
+    image: inspecthor-api:latest
+    container_name: inspecthor-api
     ports:
       - "127.0.0.1:8000:8000" # Bind to localhost only - prevents internet scanners
     environment:
       # Database connection
-      # Use SQLite for persistence (or PostgreSQL: postgresql://guardian:${DB_PASSWORD:-guardian_dev_password}@db:5432/guardian_gateway)
-      DATABASE_URL: ${DATABASE_URL:-sqlite:///./guardian_gateway.db}
+      # Use SQLite for persistence (or PostgreSQL: postgresql://inspecthor:${DB_PASSWORD:-inspecthor_dev_password}@db:5432/inspecthor)
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///./inspecthor.db}
 
       # Persist data across restarts (set to true to reset on restart)
       DROP_EXISTING_TABLES: ${DROP_EXISTING_TABLES:-false}
@@ -109,7 +109,7 @@ services:
     volumes:
       - .:/app
       # Explicit SQLite database persistence - ensures database file persists across container restarts
-      # - ./guardian_gateway.db:/app/guardian_gateway.db
+      # - ./inspecthor.db:/app/inspecthor.db
     depends_on:
       db:
         condition: service_healthy
@@ -117,21 +117,21 @@ services:
         condition: service_healthy
     restart: unless-stopped
   # Frontend IDE Service - DISABLED (runs locally for faster HMR)
-  # To run frontend: cd ../v0-guardian-gateway-ide && pnpm run dev
+  # To run frontend: cd ../inspecthor-ide-frontend && pnpm run dev
   # frontend:
   #   build:
-  #     context: ../v0-guardian-gateway-ide
+  #     context: ../inspecthor-ide-frontend
   #     dockerfile: Dockerfile
   #     args:
   #       NEXT_PUBLIC_API_URL: http://localhost:8000
-  #   container_name: guardian-frontend
+  #   container_name: inspecthor-frontend
   #   ports:
   #     - "3000:3000"
   #   environment:
   #     NEXT_PUBLIC_API_URL: http://localhost:8000
-  #     NEXT_PUBLIC_GUARDIAN_API_KEY: ${GUARDIAN_API_KEY:-dev_key_1}
+  #     NEXT_PUBLIC_INSPECTHOR_API_KEY: ${INSPECTHOR_API_KEY:-dev_key_1}
   #   volumes:
-  #     - ../v0-guardian-gateway-ide:/app
+  #     - ../inspecthor-ide-frontend:/app
   #     - /app/node_modules
   #     - /app/.next
   #   depends_on:
@@ -149,5 +149,5 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
+  inspecthor_postgres:
     driver: local

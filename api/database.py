@@ -1,5 +1,5 @@
 """
-Database models and initialization for Guardian Gateway
+Database models and initialization for Inspecthor
 Uses SQLAlchemy ORM with PostgreSQL for UUID support and cascades
 """
 
@@ -558,7 +558,7 @@ class ProofReceipt(Base):
 
 
 # Database configuration
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://guardian:guardian_dev_password@localhost:5432/guardian_gateway')
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://inspecthor:inspecthor_dev_password@localhost:5432/inspecthor')
 
 # Create engine with connection pooling for PostgreSQL
 if DATABASE_URL.startswith('sqlite'):

@@ -1,6 +1,6 @@
-# Guardian Gateway API
+# Inspecthor API
 
-Backend REST API for the Guardian Gateway IDE.
+Backend REST API for the [Inspecthor IDE](https://github.com/asaf-avron/inspecthor-ide-frontend). For the architecture and Docker quickstart, see the [main README](../README.md).
 
 ## Setup
 
@@ -46,6 +46,11 @@ uvicorn api.main:app --reload --port 8000
 
 ### Specification Generation
 - `POST /api/generate/spec` - Generate Dafny specification from English requirements
+- `POST /api/generate/find-gaps` - Run the Spec Auditor to find gaps without generating code
+- `POST /api/generate/refine-spec` - Apply accepted gap suggestions to the spec
+
+### Blueprints
+- `POST /api/v1/blueprints/initialize` - Create a blueprint from an Architect's Canvas template
 
 ### Verification
 - `POST /api/verify` - Verify Dafny code
@@ -55,7 +60,7 @@ uvicorn api.main:app --reload --port 8000
 
 ## Database Schema
 
-The API uses PostgreSQL with the following main tables:
+The API uses SQLite by default (PostgreSQL optional) with the following main tables:
 
 - **projects**: Project metadata (UUID primary key, owned by API key hash)
 - **files**: Files belonging to projects (UUID primary key, foreign key to projects)

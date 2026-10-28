@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Defines the core data structures and state invariants for the Guardian Gateway database model. This specification establishes the foundation for all other verified components.
+Defines the core data structures and state invariants for the Inspecthor database model. This specification establishes the foundation for all other verified components.
 
 ## Key Types
 
