@@ -2,6 +2,7 @@
 Tests for Blueprint Management API endpoints
 """
 
+import uuid
 
 from api.database import Blueprint, File, UnitLink
 
@@ -25,7 +26,7 @@ def test_create_blueprint(client, headers, db_session):
     
     # Verify README was created
     blueprint_id = data["blueprint_id"]
-    files = db_session.query(File).filter(File.blueprint_id == blueprint_id).all()
+    files = db_session.query(File).filter(File.blueprint_id == uuid.UUID(blueprint_id)).all()
     assert len(files) == 1
     assert files[0].filename == "README.md"
     assert files[0].file_type == "md"

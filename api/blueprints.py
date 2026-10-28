@@ -2,9 +2,8 @@
 Blueprint API endpoints.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import Optional
 
 from api.database import get_db
 from api.auth import get_current_user

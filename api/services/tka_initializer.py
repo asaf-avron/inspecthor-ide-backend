@@ -17,8 +17,8 @@ import json
 import uuid
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, asdict
+from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from api.brain.registry import RegistryManager
@@ -37,11 +37,7 @@ class TKAConfig:
     enable_iron_grip: bool = False
     github_owner: Optional[str] = None
     github_repo: Optional[str] = None
-    initial_components: List[str] = None
-
-    def __post_init__(self):
-        if self.initial_components is None:
-            self.initial_components = []
+    initial_components: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -86,8 +82,8 @@ class TKAInitializer:
         """
         logger.info(f"Initializing TKA for project: {config.project_name}")
 
-        errors = []
-        warnings = []
+        errors: List[str] = []
+        warnings: List[str] = []
         components_count = 0
         blueprints_count = 0
         proof_ledger_init = False
@@ -258,14 +254,14 @@ class TKAInitializer:
                 # Register component
                 registry_manager.add_component(
                     component_uuid=component_uuid,
-                    component_name=component_name,
-                    dafny_path=dafny_file
+                    path=os.path.relpath(component_dir, config.repo_path).replace(os.sep, "/"),
+                    name=component_name
                 )
 
                 # Record initial proof
                 proof_ledger.record_verification(
                     component_uuid=component_uuid,
-                    dafny_content=dafny_content,
+                    dafny_code=dafny_content,
                     status=VerificationStatus.VERIFIED,
                     proof_obligations=[],
                     dafny_version="4.0.0"
@@ -441,7 +437,7 @@ exit 0
 
     def _create_readme(self, config: TKAConfig, brain_path: str):
         """Create .inspecthor/README.md"""
-        readme_content = f"""# InspecThor Brain Directory
+        readme_content = """# InspecThor Brain Directory
 
 This directory contains the **Brain** of your InspecThor project.
 

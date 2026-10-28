@@ -10,7 +10,7 @@ Supports:
 
 import logging
 import os
-from typing import Optional, Dict, List, Tuple
+from typing import Any, Optional, Dict, Tuple
 import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,7 @@ graph TD
         self,
         expected_diagram: str,
         actual_diagram: str
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """
         Compare expected vs actual diagrams and identify differences
 
@@ -201,7 +201,7 @@ graph TD
         matching_nodes = len(common_nodes)
         matching_edges = len(common_edges)
 
-        similarity = 0
+        similarity: float = 0
         if total_nodes + total_edges > 0:
             similarity = ((matching_nodes + matching_edges) / (total_nodes + total_edges)) * 100
 
@@ -312,11 +312,11 @@ graph TD
         if similarity >= 95:
             return "Implementation closely matches specification."
         elif similarity >= 80:
-            return f"Implementation mostly matches specification with minor differences."
+            return "Implementation mostly matches specification with minor differences."
         elif similarity >= 60:
-            return f"Implementation has notable differences from specification."
+            return "Implementation has notable differences from specification."
         else:
-            return f"Implementation significantly differs from specification."
+            return "Implementation significantly differs from specification."
 
     def _placeholder_diagram(
         self,

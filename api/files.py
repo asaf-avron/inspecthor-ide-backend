@@ -7,6 +7,7 @@ Files must belong to a project and ownership is verified through project ownersh
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
 from typing import Optional
+import logging
 import uuid
 import icontract
 
@@ -23,6 +24,8 @@ from api.auth import get_current_user
 from api.core import adapters
 from api.core.models import FileType
 from api.core import file_operations
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -48,7 +51,7 @@ def map_error_to_status(error_kind: str) -> int:
 
 def get_api_key_from_header(
     x_api_key: Optional[str] = Header(None),
-    request: Request = None
+    request: Request = None,  # type: ignore[assignment]  # injected by FastAPI
 ) -> str:
     """
     Extract API key or generate anonymous session key.
@@ -144,6 +147,21 @@ async def save_file(
             detail=f"Blueprint {request.blueprint_id} not found or not owned by you"
         )
     
+    # SHELL VALIDATION: the Core's preconditions are defensive contracts. Reject bad input
+    # here so clients get a proper 4xx instead of an icontract ViolationError (HTTP 500).
+    if not request.filename.strip():
+        raise HTTPException(status_code=400, detail="Filename must not be empty")
+    if len(request.content.encode('utf-8')) >= 1000000:
+        raise HTTPException(status_code=400, detail="Content must be smaller than 1MB")
+    if any(
+        f.blueprint_id == request.blueprint_id and f.filename == request.filename
+        for f in state.files.values()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"A file named '{request.filename}' already exists in this blueprint"
+        )
+
     # 2. CORE: Generate UUID and call pure logic
     new_file_id = str(uuid.uuid4())
     

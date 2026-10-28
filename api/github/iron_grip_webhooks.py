@@ -6,7 +6,7 @@ Automatically validates pull requests and reports status checks.
 """
 
 import logging
-from typing import Dict, Optional
+from typing import Dict
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 import hmac
 import hashlib
@@ -109,7 +109,7 @@ async def handle_iron_grip_webhook(
     signature = request.headers.get("X-Hub-Signature-256")
     payload = await request.body()
 
-    if webhook_secret and not verify_github_signature(payload, signature, webhook_secret):
+    if webhook_secret and not verify_github_signature(payload, signature or "", webhook_secret):
         logger.warning("Invalid webhook signature")
         raise HTTPException(status_code=401, detail="Invalid signature")
 

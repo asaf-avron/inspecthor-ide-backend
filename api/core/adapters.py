@@ -6,12 +6,15 @@ This is the most difficult part of the Shell (Oracle identified as highest risk)
 Must reliably translate SQLAlchemy ORM objects (Mutable) into Python Core Models (Immutable/Frozen).
 """
 
+import logging
 from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session
 import uuid as uuid_module
 
 from api.database import Blueprint as DBBlueprint, File as DBFile
 from api.core.models import SystemState, Blueprint, File, Owner, FileType
+
+logger = logging.getLogger(__name__)
 
 
 def build_system_state(
@@ -175,7 +178,7 @@ def apply_state_diff(
         This function performs I/O operations (database writes).
         It should only be called from the Imperative Shell.
     """
-    print(f"DEBUG: apply_state_diff called. New files keys: {list(new_state.files.keys())}")
+    logger.debug("apply_state_diff called. New files keys: %s", list(new_state.files.keys()))
     # --- 1. DELETIONS (Children First) ---
     # Files first
     deleted_files = set(old_state.files.keys()) - set(new_state.files.keys())
@@ -229,7 +232,7 @@ def apply_state_diff(
         blueprint_uuid = uuid_module.UUID(new_file.blueprint_id) if isinstance(new_file.blueprint_id, str) else new_file.blueprint_id
         
         if old_file is None:
-            print(f"DEBUG: Creating file {file_id} for blueprint {blueprint_uuid}")
+            logger.debug("Creating file %s for blueprint %s", file_id, blueprint_uuid)
             # CREATE: New file
             db_file = DBFile(
                 file_id=file_uuid,

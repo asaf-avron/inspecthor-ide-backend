@@ -17,9 +17,7 @@ from api.auth import get_current_user
 from api.files import get_api_key_from_header
 from api.services.refinement_service import (
     RefinementService,
-    ComponentCategory,
-    ComponentSuggestion,
-    ComplexityReport
+    ComponentCategory
 )
 
 logger = logging.getLogger(__name__)
@@ -211,7 +209,7 @@ async def auto_refine_blueprint(
         main_spec = db.query(DBFile).filter(
             DBFile.blueprint_id == blueprint_uuid,
             DBFile.filename == "spec.md",
-            DBFile.parent_path == None
+            DBFile.parent_path.is_(None)
         ).first()
 
         if not main_spec:
@@ -277,7 +275,7 @@ async def enforce_component_metric(
         main_spec = db.query(DBFile).filter(
             DBFile.blueprint_id == blueprint_uuid,
             DBFile.filename == "spec.md",
-            DBFile.parent_path == None
+            DBFile.parent_path.is_(None)
         ).first()
 
         if not main_spec:
@@ -382,7 +380,7 @@ async def categorize_component(
             "blueprint_id": blueprint_id,
             "component_name": component_name,
             "category": category.value,
-            "description": self._get_category_description(category)
+            "description": _get_category_description(category)
         }
 
     except HTTPException:

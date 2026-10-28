@@ -4,7 +4,7 @@ Handles listing and syncing GitHub App installations for authenticated users.
 """
 
 import logging
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session

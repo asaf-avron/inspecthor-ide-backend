@@ -19,9 +19,8 @@ import os
 import yaml
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, List
+from typing import Any, Dict, Optional
 from dataclasses import dataclass, asdict
-import uuid as uuid_lib
 
 
 @dataclass
@@ -259,7 +258,8 @@ class RegistryManager:
             }
 
         with open(self.registry_path, 'r') as f:
-            return yaml.safe_load(f)
+            registry: Dict[Any, Any] = yaml.safe_load(f)
+            return registry
 
     def _write_registry(self, registry: dict) -> None:
         """Write registry.yaml file"""
@@ -303,6 +303,7 @@ def read_component_meta_file(component_path: Path) -> Optional[Dict]:
 
     try:
         with open(meta_path, 'r') as f:
-            return yaml.safe_load(f)
+            meta: Optional[Dict[Any, Any]] = yaml.safe_load(f)
+            return meta
     except Exception:
         return None

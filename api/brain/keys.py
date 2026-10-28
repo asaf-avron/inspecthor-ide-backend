@@ -10,7 +10,6 @@ Keys Structure:
     user_keys/        # User-specific keys (future)
 """
 
-import os
 from pathlib import Path
 from typing import Optional
 

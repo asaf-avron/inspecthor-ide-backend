@@ -16,7 +16,7 @@ Users never edit code directly; they only modify specifications.
 import logging
 import hashlib
 import os
-from typing import Optional, Dict, List, Tuple
+from typing import Any, Callable, Dict, Optional, List, Tuple
 from datetime import datetime
 from dataclasses import dataclass
 import google.generativeai as genai
@@ -328,7 +328,7 @@ Output the complete updated Dafny code:
         old_spec: str,
         new_spec: str,
         current_dafny: str,
-        verify_callback: Optional[callable] = None
+        verify_callback: Optional[Callable[[str], Dict[str, Any]]] = None
     ) -> HarmonizationResult:
         """
         Execute full harmonization workflow

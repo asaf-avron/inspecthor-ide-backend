@@ -16,7 +16,7 @@ import uuid
 
 from api.database import get_db, Blueprint as DBBlueprint, File as DBFile
 from api.auth import get_current_user
-from api.services.harmonization_service import get_harmonization_service, SpecChange
+from api.services.harmonization_service import get_harmonization_service
 from api.files import get_api_key_from_header
 import logging
 
@@ -277,8 +277,8 @@ async def harmonize_blueprint(
             if blueprint:
                 blueprint.sync_status = 'error'
                 db.commit()
-        except:
-            pass
+        except Exception:
+            db.rollback()
 
         raise HTTPException(status_code=500, detail=str(e))
 

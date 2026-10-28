@@ -14,7 +14,7 @@ import logging
 from api.database import get_db
 from api.auth import get_current_user
 from api.files import get_api_key_from_header
-from api.services.drift_detector import DriftDetector, DriftIssue, DriftReport, RepairResult
+from api.services.drift_detector import DriftDetector
 
 logger = logging.getLogger(__name__)
 

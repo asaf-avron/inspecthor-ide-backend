@@ -9,15 +9,15 @@ Endpoints for managing the .inspecthor/ Brain structure:
 
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional, List, Dict
 from datetime import datetime
 import os
 from pathlib import Path
 
 from .database import get_db, Blueprint, LedgerEntry
-from .brain.registry import RegistryManager, ComponentRegistryEntry
-from .brain.proof_ledger import ProofLedger, VerificationStatus, LedgerEntry as FileLedgerEntry
+from .brain.registry import RegistryManager
+from .brain.proof_ledger import ProofLedger
 from .brain.keys import KeyManager
 from .auth import get_current_user
 

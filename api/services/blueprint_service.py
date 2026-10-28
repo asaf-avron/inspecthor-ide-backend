@@ -22,7 +22,6 @@ from api.models import (
     BlueprintListResponse,
     BlueprintStructureResponse,
     BlueprintDeleteResponse,
-    BlueprintDeleteResponse,
     BlueprintInitRequest,
     BlueprintInitResponse,
     FileMetadata,
@@ -127,6 +126,8 @@ class BlueprintService:
         readme_content = f"# {name_trimmed}\n\n{description}"
         # Determine owner_id string for file operations
         owner_id_str = user_id if user_id else api_key_hash_value
+        if not owner_id_str:
+            raise HTTPException(status_code=401, detail="Authentication required")
 
         new_state, save_result = file_operations.save_file_core(
             new_state,
@@ -138,8 +139,7 @@ class BlueprintService:
             owner_id_str
         )
         
-        print(f"DEBUG: save_file_core result: {save_result.success}, {save_result.error_message}")
-        print(f"DEBUG: new_state.files keys: {list(new_state.files.keys())}")
+        logger.debug("save_file_core result: %s, %s", save_result.success, save_result.error_message)
         
         if not save_result.success:
              logger.error(f"Failed to create default README: {save_result.error_message}")
@@ -190,7 +190,7 @@ class BlueprintService:
             description=str(blueprint.description) if blueprint.description else None,  # type: ignore[arg-type]
             created_at=blueprint.created_at.isoformat(),
             updated_at=blueprint.updated_at.isoformat(),
-            file_count=0,
+            file_count=self.db.query(DBFile).filter(DBFile.blueprint_id == new_blueprint_id_uuid).count(),
             redirect_url=f"/app/{blueprint.blueprint_id}",
             repository_url=blueprint.repository_url,
             default_branch=blueprint.default_branch or "main",

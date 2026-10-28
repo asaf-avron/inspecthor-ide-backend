@@ -21,11 +21,9 @@ import subprocess
 from api.database import get_db, Blueprint as DBBlueprint, File as DBFile
 from api.auth import get_current_user
 from api.files import get_api_key_from_header
-from api.services.test_generator import TestGenerator, TestType, GeneratedTest
+from api.services.test_generator import TestGenerator, TestType
 from api.services.call_graph_analyzer import (
-    CallGraphAnalyzer,
-    GraphComparisonReport,
-    GraphDiscrepancy
+    CallGraphAnalyzer
 )
 
 logger = logging.getLogger(__name__)
@@ -182,7 +180,7 @@ async def generate_tests(
             dafny_file = db.query(DBFile).filter(
                 DBFile.blueprint_id == blueprint_uuid,
                 DBFile.filename == "core.dfy",
-                DBFile.parent_path == None
+                DBFile.parent_path.is_(None)
             ).first()
 
         if not dafny_file:
@@ -197,7 +195,7 @@ async def generate_tests(
             if test_type_str == "unit":
                 test_types.append(TestType.UNIT)
             elif test_type_str == "property":
-                test_types.append(TestType.PROPERTY_BASED)
+                test_types.append(TestType.PROPERTY)
             elif test_type_str == "fuzzer":
                 test_types.append(TestType.FUZZER)
 
@@ -208,7 +206,7 @@ async def generate_tests(
         # Create full test module
         test_module = generator.create_test_module(
             tests,
-            module_name=request.component_name or "main"
+            component_name=request.component_name or "main"
         )
 
         # Convert to response format
@@ -449,7 +447,7 @@ async def compare_call_graphs(
             diagram_file = db.query(DBFile).filter(
                 DBFile.blueprint_id == blueprint_uuid,
                 DBFile.filename == "diagram.mmd",
-                DBFile.parent_path == None
+                DBFile.parent_path.is_(None)
             ).first()
 
         if not diagram_file:

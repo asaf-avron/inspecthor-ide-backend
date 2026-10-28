@@ -15,35 +15,26 @@ Special focus on error cases that were previously missed:
 """
 
 import pytest
-from fastapi.testclient import TestClient
 import uuid
 
-from api.main import app
-from api.database import get_db, hash_api_key, Blueprint, File
+from api.database import hash_api_key, Blueprint, File
 
 
 @pytest.fixture
-def client():
-    """Create test client."""
-    return TestClient(app)
-
-
-@pytest.fixture
-def test_db():
-    """Get test database session."""
-    db = next(get_db())
-    yield db
-    db.rollback()
+def test_db(db_session):
+    """Use the per-test SQLite session from conftest (tables are created and dropped per test)."""
+    yield db_session
+    db_session.rollback()
 
 
 @pytest.fixture
 def test_blueprint(test_db):
-    """Create a test blueprint owned by dev_key_1."""
+    """Create a test blueprint owned by test_api_key_123."""
     blueprint = Blueprint(
         blueprint_id=uuid.uuid4(),
         name="Test Blueprint for Files",
         description="Testing file operations",
-        api_key_hash=hash_api_key("dev_key_1")
+        api_key_hash=hash_api_key("test_api_key_123")
     )
     test_db.add(blueprint)
     test_db.commit()
@@ -79,7 +70,7 @@ class TestFileSave:
         """Successfully save a file to an owned blueprint."""
         response = client.post(
             "/api/files/save",
-            headers={"X-API-Key": "dev_key_1"},
+            headers={"X-API-Key": "test_api_key_123"},
             json={
                 "blueprint_id": str(test_blueprint.blueprint_id),
                 "filename": "test.md",
@@ -97,7 +88,7 @@ class TestFileSave:
         fake_blueprint_id = str(uuid.uuid4())
         response = client.post(
             "/api/files/save",
-            headers={"X-API-Key": "dev_key_1"},
+            headers={"X-API-Key": "test_api_key_123"},
             json={
                 "blueprint_id": fake_blueprint_id,
                 "filename": "test.md",
@@ -112,7 +103,7 @@ class TestFileSave:
         """Saving to blueprint owned by another user should return 404 (blueprint not visible)."""
         response = client.post(
             "/api/files/save",
-            headers={"X-API-Key": "dev_key_1"},  # Not the owner
+            headers={"X-API-Key": "test_api_key_123"},  # Not the owner
             json={
                 "blueprint_id": str(other_user_blueprint.blueprint_id),
                 "filename": "test.md",
@@ -127,7 +118,7 @@ class TestFileSave:
         """Saving with empty filename should fail validation."""
         response = client.post(
             "/api/files/save",
-            headers={"X-API-Key": "dev_key_1"},
+            headers={"X-API-Key": "test_api_key_123"},
             json={
                 "blueprint_id": str(test_blueprint.blueprint_id),
                 "filename": "",
@@ -154,7 +145,7 @@ class TestFileSave:
         try:
             response = client.post(
                 "/api/files/save",
-                headers={"X-API-Key": "dev_key_1"},
+                headers={"X-API-Key": "test_api_key_123"},
                 json={
                     "blueprint_id": str(test_blueprint.blueprint_id),
                     "filename": "existing.md",  # Duplicate
@@ -186,7 +177,7 @@ class TestFileGet:
         try:
             response = client.get(
                 f"/api/files/{file.file_id}",
-                headers={"X-API-Key": "dev_key_1"}
+                headers={"X-API-Key": "test_api_key_123"}
             )
             assert response.status_code == 200
             data = response.json()
@@ -201,7 +192,7 @@ class TestFileGet:
         fake_file_id = str(uuid.uuid4())
         response = client.get(
             f"/api/files/{fake_file_id}",
-            headers={"X-API-Key": "dev_key_1"}
+            headers={"X-API-Key": "test_api_key_123"}
         )
         assert response.status_code == 404
     
@@ -220,7 +211,7 @@ class TestFileGet:
         try:
             response = client.get(
                 f"/api/files/{file.file_id}",
-                headers={"X-API-Key": "dev_key_1"}  # Wrong owner
+                headers={"X-API-Key": "test_api_key_123"}  # Wrong owner
             )
             assert response.status_code == 404
         finally:
@@ -246,7 +237,7 @@ class TestFileUpdate:
         try:
             response = client.put(
                 f"/api/files/{file.file_id}",
-                headers={"X-API-Key": "dev_key_1"},
+                headers={"X-API-Key": "test_api_key_123"},
                 json={"content": "# Updated Content"}
             )
             assert response.status_code == 200
@@ -261,7 +252,7 @@ class TestFileUpdate:
         fake_file_id = str(uuid.uuid4())
         response = client.put(
             f"/api/files/{fake_file_id}",
-            headers={"X-API-Key": "dev_key_1"},
+            headers={"X-API-Key": "test_api_key_123"},
             json={"content": "# Updated"}
         )
         assert response.status_code == 404
@@ -281,7 +272,7 @@ class TestFileUpdate:
         try:
             response = client.put(
                 f"/api/files/{file.file_id}",
-                headers={"X-API-Key": "dev_key_1"},  # Wrong owner
+                headers={"X-API-Key": "test_api_key_123"},  # Wrong owner
                 json={"content": "# Hacked!"}
             )
             assert response.status_code == 403
@@ -307,7 +298,7 @@ class TestFileDelete:
         
         response = client.delete(
             f"/api/files/{file.file_id}",
-            headers={"X-API-Key": "dev_key_1"}
+            headers={"X-API-Key": "test_api_key_123"}
         )
         assert response.status_code == 200
         data = response.json()
@@ -318,7 +309,7 @@ class TestFileDelete:
         fake_file_id = str(uuid.uuid4())
         response = client.delete(
             f"/api/files/{fake_file_id}",
-            headers={"X-API-Key": "dev_key_1"}
+            headers={"X-API-Key": "test_api_key_123"}
         )
         assert response.status_code == 404
     
@@ -337,7 +328,7 @@ class TestFileDelete:
         try:
             response = client.delete(
                 f"/api/files/{file.file_id}",
-                headers={"X-API-Key": "dev_key_1"}  # Wrong owner
+                headers={"X-API-Key": "test_api_key_123"}  # Wrong owner
             )
             assert response.status_code == 403
         finally:
@@ -354,7 +345,7 @@ class TestFileList:
         """List files when blueprint has no files."""
         response = client.get(
             f"/api/files?blueprint_id={test_blueprint.blueprint_id}",
-            headers={"X-API-Key": "dev_key_1"}
+            headers={"X-API-Key": "test_api_key_123"}
         )
         assert response.status_code == 200
         data = response.json()
@@ -384,7 +375,7 @@ class TestFileList:
         try:
             response = client.get(
                 f"/api/files?blueprint_id={test_blueprint.blueprint_id}",
-                headers={"X-API-Key": "dev_key_1"}
+                headers={"X-API-Key": "test_api_key_123"}
             )
             assert response.status_code == 200
             data = response.json()
@@ -409,7 +400,7 @@ class TestFileList:
         try:
             response = client.get(
                 f"/api/files?blueprint_id={other_user_blueprint.blueprint_id}",
-                headers={"X-API-Key": "dev_key_1"}  # Wrong owner
+                headers={"X-API-Key": "test_api_key_123"}  # Wrong owner
             )
             assert response.status_code == 200
             data = response.json()
@@ -428,7 +419,7 @@ class TestBlueprintStructureRefresh:
         # Get initial blueprint structure
         initial_response = client.get(
             f"/api/blueprints/{test_blueprint.blueprint_id}/structure",
-            headers={"X-API-Key": "dev_key_1"}
+            headers={"X-API-Key": "test_api_key_123"}
         )
         assert initial_response.status_code == 200
         initial_data = initial_response.json()
@@ -437,7 +428,7 @@ class TestBlueprintStructureRefresh:
         # Create a new markdown file via API
         create_md_response = client.post(
             "/api/files/save",
-            headers={"X-API-Key": "dev_key_1"},
+            headers={"X-API-Key": "test_api_key_123"},
             json={
                 "blueprint_id": str(test_blueprint.blueprint_id),
                 "filename": "new_file.md",
@@ -451,7 +442,7 @@ class TestBlueprintStructureRefresh:
         # Get updated blueprint structure
         updated_response = client.get(
             f"/api/blueprints/{test_blueprint.blueprint_id}/structure",
-            headers={"X-API-Key": "dev_key_1"}
+            headers={"X-API-Key": "test_api_key_123"}
         )
         assert updated_response.status_code == 200
         updated_data = updated_response.json()
@@ -466,7 +457,7 @@ class TestBlueprintStructureRefresh:
         # Create a new Dafny file
         create_dfy_response = client.post(
             "/api/files/save",
-            headers={"X-API-Key": "dev_key_1"},
+            headers={"X-API-Key": "test_api_key_123"},
             json={
                 "blueprint_id": str(test_blueprint.blueprint_id),
                 "filename": "spec.dfy",
@@ -480,7 +471,7 @@ class TestBlueprintStructureRefresh:
         # Get updated blueprint structure again
         final_response = client.get(
             f"/api/blueprints/{test_blueprint.blueprint_id}/structure",
-            headers={"X-API-Key": "dev_key_1"}
+            headers={"X-API-Key": "test_api_key_123"}
         )
         assert final_response.status_code == 200
         final_data = final_response.json()
@@ -493,5 +484,5 @@ class TestBlueprintStructureRefresh:
         assert dfy_file["file_type"] == "dfy"
         
         # Cleanup
-        client.delete(f"/api/files/{md_file_id}", headers={"X-API-Key": "dev_key_1"})
-        client.delete(f"/api/files/{dfy_file_id}", headers={"X-API-Key": "dev_key_1"})
+        client.delete(f"/api/files/{md_file_id}", headers={"X-API-Key": "test_api_key_123"})
+        client.delete(f"/api/files/{dfy_file_id}", headers={"X-API-Key": "test_api_key_123"})

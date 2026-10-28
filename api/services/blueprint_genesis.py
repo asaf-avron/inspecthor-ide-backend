@@ -4,7 +4,7 @@ Initializes empty GitHub repositories with the Trusted Kernel Architecture.
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Optional, List
 from pydantic import BaseModel
 
 from api.github.api_client import GitHubStatelessClient

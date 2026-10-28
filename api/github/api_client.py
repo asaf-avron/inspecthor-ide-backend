@@ -7,7 +7,7 @@ import base64
 import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from github import Github, GithubIntegration, Auth, InputGitTreeElement
+from github import Github, GithubIntegration, Auth
 from github.Repository import Repository
 from pydantic import BaseModel
 
@@ -336,7 +336,7 @@ class GitHubStatelessClient:
             })
         
         # Build request body
-        body = {"tree": tree_elements_json}
+        body: Dict[str, Any] = {"tree": tree_elements_json}
         if base_tree:
             body["base_tree"] = base_tree
         

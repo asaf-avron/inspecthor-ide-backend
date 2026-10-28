@@ -308,7 +308,7 @@ Return ONLY the JSON array, no explanations.
             count_penalty = 0
 
         # Distribution score (penalty for unbalanced sizes)
-        distribution_penalty = 0
+        distribution_penalty: float = 0
         if component_sizes and len(component_sizes) > 1:
             sizes = list(component_sizes.values())
             avg_size = sum(sizes) / len(sizes)

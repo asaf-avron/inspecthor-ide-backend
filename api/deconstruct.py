@@ -30,7 +30,7 @@ router = APIRouter(prefix="/api", tags=["deconstruct"])
 
 def get_api_key_from_header(
     x_api_key: Optional[str] = Header(None),
-    request: Request = None
+    request: Request = None,  # type: ignore[assignment]  # injected by FastAPI
 ) -> str:
     """
     Extract API key or generate anonymous session key.

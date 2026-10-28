@@ -17,12 +17,11 @@ Ledger Structure:
       20260204_153000_verified.json
 """
 
-import os
 import json
 import hashlib
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 import base64
@@ -84,8 +83,8 @@ class ProofLedger:
         self.ledger_path = self.repo_root / ".inspecthor" / self.LEDGER_FOLDER
         self.keys_path = self.repo_root / ".inspecthor" / "keys"
         self.enable_signing = enable_signing
-        self._private_key = None
-        self._public_key = None
+        self._private_key: Any = None
+        self._public_key: Any = None
 
         # Load keys if signing enabled
         if enable_signing:

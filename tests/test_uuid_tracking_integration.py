@@ -13,6 +13,19 @@ BASE_URL = "http://localhost:8000"
 API_KEY = f"test-key-{uuid.uuid4()}"  # Generate unique API key for test
 
 
+def _server_is_up() -> bool:
+    try:
+        return requests.get(f"{BASE_URL}/api/health", timeout=2).ok
+    except requests.RequestException:
+        return False
+
+
+# These tests talk to a running API over HTTP, so they only run when one is available.
+pytestmark = pytest.mark.skipif(
+    not _server_is_up(), reason=f"requires a running API server at {BASE_URL}"
+)
+
+
 def test_blueprint_creation_generates_uuid():
     """Test that creating a blueprint generates a component_uuid"""
 

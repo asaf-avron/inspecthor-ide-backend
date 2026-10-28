@@ -14,7 +14,7 @@ Ensures that Shell (Python implementation) obeys Kernel (Dafny spec).
 import re
 import ast
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
@@ -221,7 +221,7 @@ def {test_name}():
 
     def _parse_parameters(self, params_str: str) -> List[Tuple[str, str]]:
         """Parse Dafny parameter string"""
-        parameters = []
+        parameters: List[Tuple[str, str]] = []
 
         if not params_str or not params_str.strip():
             return parameters

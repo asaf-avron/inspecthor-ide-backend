@@ -7,8 +7,8 @@ requirements through GitHub's API.
 
 import os
 import logging
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from typing import Any, List, Dict, Optional, Tuple
+from dataclasses import dataclass, field
 import requests
 
 logger = logging.getLogger(__name__)
@@ -23,20 +23,16 @@ class ProtectionRule:
     dismiss_stale_reviews: bool = True
     require_code_owner_reviews: bool = False
     require_status_checks: bool = True
-    required_status_checks: List[str] = None
+    required_status_checks: List[str] = field(default_factory=lambda: [
+        "InspecThor - Iron Grip Checks / dafny-verification",
+        "InspecThor - Iron Grip Checks / drift-detection",
+        "InspecThor - Iron Grip Checks / component-validation",
+        "InspecThor - Iron Grip Checks / call-graph-compliance",
+        "InspecThor - Iron Grip Checks / proof-validation",
+    ])
     enforce_admins: bool = False
     allow_force_pushes: bool = False
     allow_deletions: bool = False
-
-    def __post_init__(self):
-        if self.required_status_checks is None:
-            self.required_status_checks = [
-                "InspecThor - Iron Grip Checks / dafny-verification",
-                "InspecThor - Iron Grip Checks / drift-detection",
-                "InspecThor - Iron Grip Checks / component-validation",
-                "InspecThor - Iron Grip Checks / call-graph-compliance",
-                "InspecThor - Iron Grip Checks / proof-validation"
-            ]
 
 
 @dataclass
@@ -44,11 +40,7 @@ class RepositoryConfig:
     """Repository configuration for Iron Grip"""
     owner: str
     repo: str
-    protected_branches: List[str] = None
-
-    def __post_init__(self):
-        if self.protected_branches is None:
-            self.protected_branches = ["main", "master"]
+    protected_branches: List[str] = field(default_factory=lambda: ["main", "master"])
 
 
 class GitHubProtectionService:
@@ -238,7 +230,7 @@ class GitHubProtectionService:
                 "X-GitHub-Api-Version": "2022-11-28"
             }
 
-            data = {
+            data: Dict[str, Any] = {
                 "name": check_name,
                 "head_sha": commit_sha,
                 "status": status
@@ -331,7 +323,7 @@ class GitHubProtectionService:
             }
 
             # Build protection configuration
-            protection_config = {
+            protection_config: Dict[str, Any] = {
                 "required_status_checks": None,
                 "enforce_admins": rule.enforce_admins,
                 "required_pull_request_reviews": None,
@@ -443,7 +435,7 @@ class GitHubProtectionService:
             "proof-validation"
         ]
 
-        results = {
+        results: Dict[str, Any] = {
             "commit": commit_sha,
             "checks": {},
             "all_passed": False,

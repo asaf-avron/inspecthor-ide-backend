@@ -91,13 +91,13 @@ async def generate_expected_diagram(
 
         diagram = generator.generate_from_spec(
             spec_md=request.spec_content,
-            component_name=request.component_name
+            component_name=request.component_name or "Component"
         )
 
         return DiagramResponse(
             diagram=diagram,
             diagram_type="expected",
-            component_name=request.component_name,
+            component_name=request.component_name or "Component",
             generated_from="spec"
         )
 
@@ -123,13 +123,13 @@ async def generate_actual_diagram(
 
         diagram = generator.generate_from_code(
             python_code=request.code_content,
-            component_name=request.component_name
+            component_name=request.component_name or "Component"
         )
 
         return DiagramResponse(
             diagram=diagram,
             diagram_type="actual",
-            component_name=request.component_name,
+            component_name=request.component_name or "Component",
             generated_from="code"
         )
 

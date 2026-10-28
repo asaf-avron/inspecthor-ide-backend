@@ -13,9 +13,8 @@ Uses UUID-based tracking to maintain identity across moves.
 import os
 import logging
 import json
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict
 from dataclasses import dataclass
-from pathlib import Path
 from datetime import datetime
 
 from api.brain.registry import RegistryManager
@@ -124,7 +123,7 @@ class DriftDetector:
         health_score = self._calculate_health_score(issues)
 
         # Count issues by type
-        issues_by_type = {}
+        issues_by_type: Dict[str, int] = {}
         for issue in issues:
             issues_by_type[issue.severity] = issues_by_type.get(issue.severity, 0) + 1
 
