@@ -1,6 +1,6 @@
 # **Dafny Reference Manual (RAG Optimized)**
 
-For: Guardian Gateway Spec Auditor  
+For: Inspecthor Spec Auditor  
 Focus: Verification, Refinement, and Contracts
 
 ## **1\. Core Types & Logic**

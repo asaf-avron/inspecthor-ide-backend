@@ -1,5 +1,5 @@
 """
-Pytest configuration and shared fixtures for Guardian Gateway tests.
+Pytest configuration and shared fixtures for Inspecthor tests.
 """
 
 import os

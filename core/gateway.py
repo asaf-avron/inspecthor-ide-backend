@@ -1,4 +1,4 @@
-# Guardian Gateway - Core Gateway
+# Inspecthor - Core Gateway
 # Verification engine that transpiles Python to Dafny and verifies against contracts
 # Functional Core: No UI framework imports in core
 

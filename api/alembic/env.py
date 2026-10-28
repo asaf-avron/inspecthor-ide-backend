@@ -23,7 +23,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Get database URL from environment variable
-database_url = os.getenv('DATABASE_URL', 'postgresql://guardian:guardian_dev_password@localhost:5432/guardian_gateway')
+database_url = os.getenv('DATABASE_URL', 'postgresql://inspecthor:inspecthor_dev_password@localhost:5432/inspecthor')
 config.set_main_option('sqlalchemy.url', database_url)
 
 # add your model's MetaData object here

@@ -1,5 +1,5 @@
 """
-Oracle test infrastructure for Guardian Gateway.
+Oracle test infrastructure for Inspecthor.
 Tests that Python Core implementations match Dafny specifications.
 
 Oracle tests load test vectors generated from Dafny GenerateTests() methods
