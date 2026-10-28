@@ -1,6 +1,6 @@
 # Guardian Gateway - Backend Docker Compose
 # Includes: Backend API, PostgreSQL Database, Dafny Verifier
-# Frontend runs locally via: cd ../v0-guardian-gateway-ide && pnpm run dev
+# Frontend runs locally via: cd ../inspecthor-ide-frontend && pnpm run dev
 # Run with: docker-compose up --build
 
 version: '3.8'
@@ -117,10 +117,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
   # Frontend IDE Service - DISABLED (runs locally for faster HMR)
-  # To run frontend: cd ../v0-guardian-gateway-ide && pnpm run dev
+  # To run frontend: cd ../inspecthor-ide-frontend && pnpm run dev
   # frontend:
   #   build:
-  #     context: ../v0-guardian-gateway-ide
+  #     context: ../inspecthor-ide-frontend
   #     dockerfile: Dockerfile
   #     args:
   #       NEXT_PUBLIC_API_URL: http://localhost:8000
@@ -131,7 +131,7 @@ services:
   #     NEXT_PUBLIC_API_URL: http://localhost:8000
   #     NEXT_PUBLIC_GUARDIAN_API_KEY: ${GUARDIAN_API_KEY:-dev_key_1}
   #   volumes:
-  #     - ../v0-guardian-gateway-ide:/app
+  #     - ../inspecthor-ide-frontend:/app
   #     - /app/node_modules
   #     - /app/.next
   #   depends_on:
