@@ -4,7 +4,7 @@ Handles listing and syncing GitHub App installations for authenticated users.
 """
 
 import logging
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -251,7 +251,7 @@ async def list_installation_repositories(
                             "full_name": repo.full_name,
                             "default_branch": repo.default_branch,
                             "html_url": f"https://github.com/{repo.full_name}",
-                            "project_id": str(repo.project_id) if repo.project_id else None,
+                            "blueprint_id": str(repo.blueprint_id) if repo.blueprint_id else None,
                         }
                         for repo in repositories
                     ]

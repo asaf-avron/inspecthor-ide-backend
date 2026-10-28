@@ -33,7 +33,7 @@ def test_database_schema_creation_with_sqlite():
             result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
             tables = [row[0] for row in result]
             assert 'users' in tables
-            assert 'projects' in tables
+            assert 'blueprints' in tables
             assert 'files' in tables
         
         # Close engine to release file handle

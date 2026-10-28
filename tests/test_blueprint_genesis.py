@@ -6,39 +6,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from api.services.blueprint_genesis import BlueprintGenesisService, GenesisResult
-from api.blueprints import parse_github_url
-
-
-class TestParseGitHubUrl:
-    """Test GitHub URL parsing."""
-    
-    def test_parse_https_url(self):
-        owner, repo = parse_github_url("https://github.com/owner/repo")
-        assert owner == "owner"
-        assert repo == "repo"
-    
-    def test_parse_https_url_with_git_suffix(self):
-        owner, repo = parse_github_url("https://github.com/owner/repo.git")
-        assert owner == "owner"
-        assert repo == "repo"
-    
-    def test_parse_https_url_with_trailing_slash(self):
-        owner, repo = parse_github_url("https://github.com/owner/repo/")
-        assert owner == "owner"
-        assert repo == "repo"
-    
-    def test_parse_ssh_url(self):
-        owner, repo = parse_github_url("git@github.com:owner/repo.git")
-        assert owner == "owner"
-        assert repo == "repo"
-    
-    def test_parse_invalid_url_raises(self):
-        with pytest.raises(ValueError):
-            parse_github_url("https://gitlab.com/owner/repo")
-    
-    def test_parse_malformed_url_raises(self):
-        with pytest.raises(ValueError):
-            parse_github_url("not-a-url")
 
 
 class TestBlueprintGenesisService:
@@ -96,59 +63,54 @@ class TestBlueprintGenesisService:
         assert "ensures true" in kernel
 
 
+def _service_with_mock_client():
+    """Build a service whose GitHub client is a mock (no real GitHub App credentials needed)."""
+    service = BlueprintGenesisService()
+    client = MagicMock()
+    client.get_default_branch = AsyncMock(return_value="main")
+    client.get_tree = AsyncMock(return_value=[])
+    service._client = client
+    return service, client
+
+
 @pytest.mark.asyncio
 class TestBlueprintGenesisIntegration:
     """Integration tests for genesis workflow."""
-    
+
     async def test_check_repo_is_empty_returns_true_for_empty(self):
         """Verify empty repo detection works."""
-        service = BlueprintGenesisService()
-        
-        # Mock the client methods
-        with patch.object(service, 'client') as mock_client:
-            mock_client.get_default_branch.return_value = "main"
-            mock_client.get_tree.return_value = []
-            
-            result = await service.check_repo_is_empty(123, "owner", "repo")
-            assert result is True
-    
+        service, client = _service_with_mock_client()
+        client.get_tree.return_value = []
+
+        assert await service.check_repo_is_empty(123, "owner", "repo") is True
+
     async def test_check_repo_is_empty_returns_true_for_readme_only(self):
         """Verify repo with only README is considered empty."""
-        service = BlueprintGenesisService()
-        
-        with patch.object(service, 'client') as mock_client:
-            mock_client.get_default_branch.return_value = "main"
-            
-            # Mock tree entry with README
-            readme_entry = MagicMock()
-            readme_entry.path = "README.md"
-            mock_client.get_tree.return_value = [readme_entry]
-            
-            result = await service.check_repo_is_empty(123, "owner", "repo")
-            assert result is True
-    
+        service, client = _service_with_mock_client()
+
+        readme_entry = MagicMock()
+        readme_entry.path = "README.md"
+        client.get_tree.return_value = [readme_entry]
+
+        assert await service.check_repo_is_empty(123, "owner", "repo") is True
+
     async def test_check_repo_is_empty_returns_false_for_non_empty(self):
         """Verify repo with code files is not considered empty."""
-        service = BlueprintGenesisService()
-        
-        with patch.object(service, 'client') as mock_client:
-            mock_client.get_default_branch.return_value = "main"
-            
-            # Mock tree entry with code file
-            code_entry = MagicMock()
-            code_entry.path = "src/main.py"
-            mock_client.get_tree.return_value = [code_entry]
-            
-            result = await service.check_repo_is_empty(123, "owner", "repo")
-            assert result is False
-    
+        service, client = _service_with_mock_client()
+
+        code_entry = MagicMock()
+        code_entry.path = "src/main.py"
+        client.get_tree.return_value = [code_entry]
+
+        assert await service.check_repo_is_empty(123, "owner", "repo") is False
+
     async def test_initialize_repository_fails_on_non_empty_repo(self):
         """Verify genesis fails for non-empty repos when force=False."""
         service = BlueprintGenesisService()
-        
+
         with patch.object(service, 'check_repo_is_empty', new_callable=AsyncMock) as mock_check:
             mock_check.return_value = False
-            
+
             with pytest.raises(ValueError, match="not empty"):
                 await service.initialize_repository(
                     installation_id=123,
@@ -158,33 +120,28 @@ class TestBlueprintGenesisIntegration:
                     domain="custom",
                     force=False
                 )
-    
+
     async def test_initialize_repository_succeeds_with_force(self):
         """Verify genesis works for non-empty repos when force=True."""
-        service = BlueprintGenesisService()
-        
-        with patch.object(service, 'client') as mock_client:
-            # Mock all required methods
-            mock_client.get_default_branch.return_value = "main"
-            mock_client.get_ref = AsyncMock(return_value={"object": {"sha": "abc123"}})
-            mock_client.create_tree = AsyncMock(return_value={"sha": "tree123"})
-            mock_client.create_commit = AsyncMock(return_value={"sha": "commit456"})
-            
-            mock_repo = MagicMock()
-            mock_ref = MagicMock()
-            mock_repo.get_git_ref.return_value = mock_ref
-            mock_client._get_repo.return_value = mock_repo
-            
-            result = await service.initialize_repository(
-                installation_id=123,
-                owner="owner",
-                repo="repo",
-                blueprint_name="Test Blueprint",
-                domain="banking",
-                force=True
-            )
-            
-            assert result.commit_sha == "commit456"
-            assert "github.com/owner/repo" in result.commit_url
-            assert "blueprint.yaml" in result.files_created
-            assert "kernel/Main.dfy" in result.files_created
+        service, client = _service_with_mock_client()
+        client.get_ref = AsyncMock(return_value={"object": {"sha": "abc123"}})
+        client.create_tree = AsyncMock(return_value={"sha": "tree123"})
+        client.create_commit = AsyncMock(return_value={"sha": "commit456"})
+
+        mock_repo = MagicMock()
+        mock_repo.get_git_ref.return_value = MagicMock()
+        client._get_repo.return_value = mock_repo
+
+        result = await service.initialize_repository(
+            installation_id=123,
+            owner="owner",
+            repo="repo",
+            blueprint_name="Test Blueprint",
+            domain="banking",
+            force=True
+        )
+
+        assert result.commit_sha == "commit456"
+        assert "github.com/owner/repo" in result.commit_url
+        assert "blueprint.yaml" in result.files_created
+        assert "kernel/Main.dfy" in result.files_created

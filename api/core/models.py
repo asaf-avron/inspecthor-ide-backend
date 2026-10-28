@@ -57,7 +57,7 @@ class File:
     Immutable dataclass representing a file in the system.
     """
     file_id: str
-    project_id: str
+    blueprint_id: str
     filename: str
     content: str
     file_type: FileType
@@ -71,12 +71,12 @@ class File:
 
 
 @dataclass(frozen=True)
-class Project:
+class Blueprint:
     """
-    Project model matching Dafny Project datatype.
-    Immutable dataclass representing a project in the system.
+    Blueprint model matching Dafny Blueprint datatype.
+    Immutable dataclass representing a blueprint in the system.
     """
-    project_id: str
+    blueprint_id: str
     name: str
     description: str
     owner: Owner
@@ -91,7 +91,7 @@ class SystemState:
     
     This is the "World" passed to every transition function in the Functional Core.
     """
-    projects: Dict[str, Project] = field(default_factory=dict)
+    blueprints: Dict[str, Blueprint] = field(default_factory=dict)
     files: Dict[str, File] = field(default_factory=dict)
     
     def validate(self) -> bool:
@@ -101,19 +101,19 @@ class SystemState:
         Returns:
             True if state is valid, raises ValueError if invalid
         """
-        # 1. Relational Integrity: Every file pointed to by a project exists
-        for pid, project in self.projects.items():
-            for fid in project.file_ids:
+        # 1. Relational Integrity: Every file pointed to by a blueprint exists
+        for pid, blueprint in self.blueprints.items():
+            for fid in blueprint.file_ids:
                 if fid not in self.files:
-                    raise ValueError(f"Project {pid} references file {fid} that doesn't exist")
+                    raise ValueError(f"Blueprint {pid} references file {fid} that doesn't exist")
         
-        # 2. Reverse Integrity: Every file points back to its project
+        # 2. Reverse Integrity: Every file points back to its blueprint
         for fid, file_obj in self.files.items():
-            if file_obj.project_id not in self.projects:
-                raise ValueError(f"File {fid} references project {file_obj.project_id} that doesn't exist")
+            if file_obj.blueprint_id not in self.blueprints:
+                raise ValueError(f"File {fid} references blueprint {file_obj.blueprint_id} that doesn't exist")
             
-            if fid not in self.projects[file_obj.project_id].file_ids:
-                raise ValueError(f"File {fid} not in project {file_obj.project_id}.file_ids")
+            if fid not in self.blueprints[file_obj.blueprint_id].file_ids:
+                raise ValueError(f"File {fid} not in blueprint {file_obj.blueprint_id}.file_ids")
         
         # 3. Size Integrity: File metadata matches content
         for fid, file_obj in self.files.items():
@@ -123,37 +123,37 @@ class SystemState:
         
         return True
     
-    def with_project(self, project: Project) -> "SystemState":
-        """Return new state with project added/updated (immutable update)."""
-        new_projects = {**self.projects, project.project_id: project}
-        return SystemState(projects=new_projects, files=self.files)
+    def with_blueprint(self, blueprint: Blueprint) -> "SystemState":
+        """Return new state with blueprint added/updated (immutable update)."""
+        new_blueprints = {**self.blueprints, blueprint.blueprint_id: blueprint}
+        return SystemState(blueprints=new_blueprints, files=self.files)
     
     def with_file(self, file_obj: File) -> "SystemState":
         """Return new state with file added/updated (immutable update)."""
         new_files = {**self.files, file_obj.file_id: file_obj}
-        # Update project's file_ids set
-        project = self.projects.get(file_obj.project_id)
-        if project:
-            new_file_ids = project.file_ids | {file_obj.file_id}
-            new_project = Project(
-                project_id=project.project_id,
-                name=project.name,
-                description=project.description,
-                owner=project.owner,
+        # Update blueprint's file_ids set
+        blueprint = self.blueprints.get(file_obj.blueprint_id)
+        if blueprint:
+            new_file_ids = blueprint.file_ids | {file_obj.file_id}
+            new_blueprint = Blueprint(
+                blueprint_id=blueprint.blueprint_id,
+                name=blueprint.name,
+                description=blueprint.description,
+                owner=blueprint.owner,
                 file_ids=new_file_ids
             )
-            new_projects = {**self.projects, new_project.project_id: new_project}
+            new_blueprints = {**self.blueprints, new_blueprint.blueprint_id: new_blueprint}
         else:
-            new_projects = self.projects
+            new_blueprints = self.blueprints
         
-        return SystemState(projects=new_projects, files=new_files)
+        return SystemState(blueprints=new_blueprints, files=new_files)
     
-    def without_project(self, project_id: str) -> "SystemState":
-        """Return new state with project removed (immutable update)."""
-        new_projects = {k: v for k, v in self.projects.items() if k != project_id}
-        # Also remove all files belonging to this project
-        new_files = {k: v for k, v in self.files.items() if v.project_id != project_id}
-        return SystemState(projects=new_projects, files=new_files)
+    def without_blueprint(self, blueprint_id: str) -> "SystemState":
+        """Return new state with blueprint removed (immutable update)."""
+        new_blueprints = {k: v for k, v in self.blueprints.items() if k != blueprint_id}
+        # Also remove all files belonging to this blueprint
+        new_files = {k: v for k, v in self.files.items() if v.blueprint_id != blueprint_id}
+        return SystemState(blueprints=new_blueprints, files=new_files)
     
     def without_file(self, file_id: str) -> "SystemState":
         """Return new state with file removed (immutable update)."""
@@ -163,22 +163,22 @@ class SystemState:
         
         new_files = {k: v for k, v in self.files.items() if k != file_id}
         
-        # Update project's file_ids set
-        project = self.projects.get(file_obj.project_id)
-        if project:
-            new_file_ids = project.file_ids - {file_id}
-            new_project = Project(
-                project_id=project.project_id,
-                name=project.name,
-                description=project.description,
-                owner=project.owner,
+        # Update blueprint's file_ids set
+        blueprint = self.blueprints.get(file_obj.blueprint_id)
+        if blueprint:
+            new_file_ids = blueprint.file_ids - {file_id}
+            new_blueprint = Blueprint(
+                blueprint_id=blueprint.blueprint_id,
+                name=blueprint.name,
+                description=blueprint.description,
+                owner=blueprint.owner,
                 file_ids=new_file_ids
             )
-            new_projects = {**self.projects, new_project.project_id: new_project}
+            new_blueprints = {**self.blueprints, new_blueprint.blueprint_id: new_blueprint}
         else:
-            new_projects = self.projects
+            new_blueprints = self.blueprints
         
-        return SystemState(projects=new_projects, files=new_files)
+        return SystemState(blueprints=new_blueprints, files=new_files)
 
 
 @dataclass(frozen=True)
@@ -203,7 +203,7 @@ class Result:
         Create failure result with error kind.
         
         Error kinds:
-        - NotFound: Resource (project/file) not found in state
+        - NotFound: Resource (blueprint/file) not found in state
         - Unauthorized: Owner mismatch (403)
         - Conflict: Uniqueness violation (409)
         - Precondition: Input validation failure (400)

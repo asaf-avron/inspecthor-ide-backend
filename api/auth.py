@@ -157,8 +157,8 @@ async def github_oauth_callback(
     error: Optional[str] = None,
     error_description: Optional[str] = None,
     state: Optional[str] = None,
-    response: Response = None,
-    request: FastAPIRequest = None,
+    response: Response = None,  # type: ignore[assignment]  # injected by FastAPI
+    request: FastAPIRequest = None,  # type: ignore[assignment]  # injected by FastAPI
     db: Session = Depends(get_db)
 ):
     """
@@ -324,7 +324,7 @@ async def github_oauth_callback(
 @router.post("/refresh", response_model=TokenRefreshResponse)
 async def refresh_access_token(
     refresh_token: Optional[str] = Cookie(None),
-    response: Response = None,
+    response: Response = None,  # type: ignore[assignment]  # injected by FastAPI
     db: Session = Depends(get_db)
 ):
     """

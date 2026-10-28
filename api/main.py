@@ -40,12 +40,20 @@ from api import files
 from api.files import get_api_key_from_header
 from api import verification
 from api import deconstruct
-from api import projects
 from api import auth
 from api.auth import get_current_user
 from api.github import webhooks as github_webhooks
 from api.github import installations as github_installations
+from api.github import iron_grip_webhooks
 from api import blueprints
+from api import brain_routes
+from api import diagram_routes
+from api import harmonization_routes
+from api import drift_routes
+from api import refinement_routes
+from api import runtime_routes
+from api import iron_grip_routes
+from api import tka_routes
 from api.services.spec_generator import SpecGeneratorService
 from sqlalchemy.orm import Session
 
@@ -129,10 +137,18 @@ app.include_router(auth.router)
 app.include_router(files.router)
 app.include_router(verification.router)
 app.include_router(deconstruct.router)
-app.include_router(projects.router)
 app.include_router(github_webhooks.router)
 app.include_router(github_installations.router)  # GitHub Installations API
+app.include_router(iron_grip_webhooks.router)  # Iron Grip Webhook Handlers
 app.include_router(blueprints.router)  # Blueprint Genesis API
+app.include_router(brain_routes.router)  # Brain (Registry & Proof Ledger) API
+app.include_router(diagram_routes.router)  # Mermaid Diagram Visualization API
+app.include_router(harmonization_routes.router)  # Harmonization & Sync Status API
+app.include_router(drift_routes.router)  # Drift Detection & Repair API
+app.include_router(refinement_routes.router)  # Component Refinement & Complexity Analysis API
+app.include_router(runtime_routes.router)  # Runtime Verification & Test Generation API
+app.include_router(iron_grip_routes.router)  # Iron Grip - Branch Protection & Enforcement API
+app.include_router(tka_routes.router)  # TKA Initialization - Project Bootstrap API
 
 
 @app.get("/api/health", response_model=HealthResponse)

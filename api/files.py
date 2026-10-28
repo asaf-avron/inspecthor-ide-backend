@@ -7,10 +7,11 @@ Files must belong to a project and ownership is verified through project ownersh
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
 from typing import Optional
+import logging
 import uuid
 import icontract
 
-from api.database import get_db, hash_api_key, File as DBFile, Project as DBProject, User
+from api.database import get_db, hash_api_key, File as DBFile, Blueprint as DBBlueprint, User
 from api.models import (
     FileSaveRequest,
     FileSaveResponse,
@@ -23,6 +24,8 @@ from api.auth import get_current_user
 from api.core import adapters
 from api.core.models import FileType
 from api.core import file_operations
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -48,7 +51,7 @@ def map_error_to_status(error_kind: str) -> int:
 
 def get_api_key_from_header(
     x_api_key: Optional[str] = Header(None),
-    request: Request = None
+    request: Request = None,  # type: ignore[assignment]  # injected by FastAPI
 ) -> str:
     """
     Extract API key or generate anonymous session key.
@@ -66,21 +69,21 @@ def get_api_key_from_header(
     return "anon_default"
 
 
-def get_project_owner_filter(user: Optional[User] = None, api_key_hash_value: Optional[str] = None):
+def get_blueprint_owner_filter(user: Optional[User] = None, api_key_hash_value: Optional[str] = None):
     """
-    Get SQLAlchemy filter for project ownership.
+    Get SQLAlchemy filter for blueprint ownership.
     Returns a filter that checks user_id (if authenticated) or api_key_hash (if anonymous).
-    For authenticated users, also checks api_key_hash to include projects created before user auth was implemented.
+    For authenticated users, also checks api_key_hash to include blueprints created before user auth was implemented.
     """
     from sqlalchemy import or_
     if user:
         # Check both user_id and api_key_hash for authenticated users (migration support)
         return or_(
-            DBProject.user_id == user.user_id,
-            DBProject.api_key_hash == api_key_hash_value
+            DBBlueprint.user_id == user.user_id,
+            DBBlueprint.api_key_hash == api_key_hash_value
         )
     elif api_key_hash_value:
-        return DBProject.api_key_hash == api_key_hash_value
+        return DBBlueprint.api_key_hash == api_key_hash_value
     else:
         # Should not happen, but return a filter that matches nothing
         from sqlalchemy import false
@@ -90,7 +93,7 @@ def get_project_owner_filter(user: Optional[User] = None, api_key_hash_value: Op
 @icontract.require(
     lambda request, api_key, db, current_user:
         request is not None and
-        request.project_id is not None and
+        request.blueprint_id is not None and
         request.filename is not None and
         len(request.filename) > 0 and
         request.content is not None and
@@ -128,22 +131,37 @@ async def save_file(
     else:
         raise HTTPException(status_code=403, detail="Authentication required")
     
-    # 1. I/O: Load scoped state (project + all its files for uniqueness check)
-    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
+    # 1. I/O: Load scoped state (blueprint + all its files for uniqueness check)
+    owner_filter = get_blueprint_owner_filter(current_user, api_key_hash_value)
     state = adapters.build_scoped_state(
-        project_id=request.project_id,
+        blueprint_id=request.blueprint_id,
         owner_filter=owner_filter,
         db=db
     )
     
-    # SHELL VALIDATION: Check project exists before calling Core
+    # SHELL VALIDATION: Check blueprint exists before calling Core
     # This prevents icontract ViolationError and provides proper HTTP error
-    if request.project_id not in state.projects:
+    if request.blueprint_id not in state.blueprints:
         raise HTTPException(
             status_code=404,
-            detail=f"Project {request.project_id} not found or not owned by you"
+            detail=f"Blueprint {request.blueprint_id} not found or not owned by you"
         )
     
+    # SHELL VALIDATION: the Core's preconditions are defensive contracts. Reject bad input
+    # here so clients get a proper 4xx instead of an icontract ViolationError (HTTP 500).
+    if not request.filename.strip():
+        raise HTTPException(status_code=400, detail="Filename must not be empty")
+    if len(request.content.encode('utf-8')) >= 1000000:
+        raise HTTPException(status_code=400, detail="Content must be smaller than 1MB")
+    if any(
+        f.blueprint_id == request.blueprint_id and f.filename == request.filename
+        for f in state.files.values()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"A file named '{request.filename}' already exists in this blueprint"
+        )
+
     # 2. CORE: Generate UUID and call pure logic
     new_file_id = str(uuid.uuid4())
     
@@ -158,7 +176,7 @@ async def save_file(
     new_state, result = file_operations.save_file_core(
         state,
         new_file_id,
-        request.project_id,
+        request.blueprint_id,
         request.filename,
         request.content,
         file_type,
@@ -205,8 +223,8 @@ async def get_file(
     """
     api_key_hash_value = hash_api_key(api_key) if api_key else None
     
-    # Join with project to verify ownership
-    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
+    # Join with blueprint to verify ownership
+    owner_filter = get_blueprint_owner_filter(current_user, api_key_hash_value)
     
     # Convert string UUID to UUID object for SQLite compatibility
     try:
@@ -214,7 +232,7 @@ async def get_file(
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid file ID format")
     
-    db_file = db.query(DBFile).join(DBProject).filter(
+    db_file = db.query(DBFile).join(DBBlueprint).filter(
         DBFile.file_id == file_id_uuid,
         owner_filter
     ).first()
@@ -227,7 +245,7 @@ async def get_file(
         filename=str(db_file.filename),  # type: ignore[arg-type]
         content=str(db_file.content),  # type: ignore[arg-type]
         file_type=str(db_file.file_type),  # type: ignore[arg-type]
-        project_id=str(db_file.project_id),
+        blueprint_id=str(db_file.blueprint_id),
         created_at=db_file.created_at.isoformat(),
         updated_at=db_file.updated_at.isoformat(),
         size_bytes=len(db_file.content.encode('utf-8')),
@@ -237,29 +255,29 @@ async def get_file(
 
 @router.get("", response_model=FileListResponse)
 async def list_files(
-    project_id: Optional[str] = None,
+    blueprint_id: Optional[str] = None,
     file_type: Optional[str] = None,
     api_key: str = Depends(get_api_key_from_header),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
     """
-    List all files from projects owned by the authenticated user or API key.
-    Optionally filter by project_id and file_type.
+    List all files from blueprints owned by the authenticated user or API key.
+    Optionally filter by blueprint_id and file_type.
     """
     api_key_hash_value = hash_api_key(api_key) if api_key else None
     
-    # Join with project to verify ownership
-    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
-    query = db.query(DBFile).join(DBProject).filter(owner_filter)
+    # Join with blueprint to verify ownership
+    owner_filter = get_blueprint_owner_filter(current_user, api_key_hash_value)
+    query = db.query(DBFile).join(DBBlueprint).filter(owner_filter)
     
-    if project_id:
+    if blueprint_id:
         # Convert string UUID to UUID object for SQLite compatibility
         try:
-            project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+            blueprint_id_uuid = uuid.UUID(blueprint_id) if isinstance(blueprint_id, str) else blueprint_id
         except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="Invalid project ID format")
-        query = query.filter(DBFile.project_id == project_id_uuid)
+            raise HTTPException(status_code=400, detail="Invalid blueprint ID format")
+        query = query.filter(DBFile.blueprint_id == blueprint_id_uuid)
     if file_type:
         query = query.filter(DBFile.file_type == file_type)
     
@@ -324,7 +342,7 @@ async def update_file(
     else:
         raise HTTPException(status_code=403, detail="Authentication required")
     
-    # 1. I/O: Load file to get project_id, then load scoped state
+    # 1. I/O: Load file to get blueprint_id, then load scoped state
     # Convert string UUID to UUID object for SQLite compatibility
     try:
         file_id_uuid = uuid.UUID(file_id) if isinstance(file_id, str) else file_id
@@ -335,19 +353,19 @@ async def update_file(
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
+    owner_filter = get_blueprint_owner_filter(current_user, api_key_hash_value)
     state = adapters.build_scoped_state(
-        project_id=str(db_file.project_id),
+        blueprint_id=str(db_file.blueprint_id),
         owner_filter=owner_filter,
         db=db
     )
     
-    # SHELL VALIDATION: Check project ownership before calling Core
-    project_id_str = str(db_file.project_id)
-    if project_id_str not in state.projects:
+    # SHELL VALIDATION: Check blueprint ownership before calling Core
+    blueprint_id_str = str(db_file.blueprint_id)
+    if blueprint_id_str not in state.blueprints:
         raise HTTPException(
             status_code=403,
-            detail="File belongs to a project you don't own"
+            detail="File belongs to a blueprint you don't own"
         )
     
     # 2. CORE: Call pure logic
@@ -368,13 +386,29 @@ async def update_file(
     adapters.apply_state_diff(db, state, new_state)
     db.commit()
     db.refresh(db_file)
-    
+
+    # AI-Gapped Development: Mark blueprint as dirty if spec file changed (Task #4)
+    if db_file.file_type == "md" and "spec" in db_file.filename.lower():
+        try:
+            from api.database import Blueprint as DBBlueprint
+            blueprint = db.query(DBBlueprint).filter(
+                DBBlueprint.blueprint_id == db_file.blueprint_id
+            ).first()
+
+            if blueprint and blueprint.sync_status == 'clean':
+                blueprint.sync_status = 'dirty'
+                db.commit()
+                logger.info(f"Marked blueprint {blueprint.blueprint_id} as dirty (spec.md changed)")
+        except Exception as e:
+            logger.warning(f"Failed to mark blueprint dirty: {e}")
+            # Don't fail the file save if status update fails
+
     return FileResponse(
         file_id=str(db_file.file_id),
         filename=str(db_file.filename),  # type: ignore[arg-type]
         content=str(db_file.content),  # type: ignore[arg-type]
         file_type=str(db_file.file_type),  # type: ignore[arg-type]
-        project_id=str(db_file.project_id),
+        blueprint_id=str(db_file.blueprint_id),
         created_at=db_file.created_at.isoformat(),
         updated_at=db_file.updated_at.isoformat(),
         size_bytes=len(db_file.content.encode('utf-8')),
@@ -419,7 +453,7 @@ async def delete_file(
     else:
         raise HTTPException(status_code=403, detail="Authentication required")
     
-    # 1. I/O: Load file to get project_id, then load scoped state
+    # 1. I/O: Load file to get blueprint_id, then load scoped state
     # Convert string UUID to UUID object for SQLite compatibility
     try:
         file_id_uuid = uuid.UUID(file_id) if isinstance(file_id, str) else file_id
@@ -430,19 +464,19 @@ async def delete_file(
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    owner_filter = get_project_owner_filter(current_user, api_key_hash_value)
+    owner_filter = get_blueprint_owner_filter(current_user, api_key_hash_value)
     state = adapters.build_scoped_state(
-        project_id=str(db_file.project_id),
+        blueprint_id=str(db_file.blueprint_id),
         owner_filter=owner_filter,
         db=db
     )
     
-    # SHELL VALIDATION: Check project ownership before calling Core
-    project_id_str = str(db_file.project_id)
-    if project_id_str not in state.projects:
+    # SHELL VALIDATION: Check blueprint ownership before calling Core
+    blueprint_id_str = str(db_file.blueprint_id)
+    if blueprint_id_str not in state.blueprints:
         raise HTTPException(
             status_code=403,
-            detail="File belongs to a project you don't own"
+            detail="File belongs to a blueprint you don't own"
         )
     
     # 2. CORE: Call pure logic

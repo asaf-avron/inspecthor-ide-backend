@@ -30,7 +30,7 @@ router = APIRouter(prefix="/api", tags=["deconstruct"])
 
 def get_api_key_from_header(
     x_api_key: Optional[str] = Header(None),
-    request: Request = None
+    request: Request = None,  # type: ignore[assignment]  # injected by FastAPI
 ) -> str:
     """
     Extract API key or generate anonymous session key.
@@ -250,11 +250,11 @@ async def deconstruct_specification(
     if not source_file:
         raise HTTPException(status_code=404, detail="Source file not found")
     
-    # Verify project ownership
-    if str(source_file.project_id) != request.project_id:
+    # Verify blueprint ownership
+    if str(source_file.blueprint_id) != request.blueprint_id:
         raise HTTPException(
             status_code=400,
-            detail="Source file does not belong to specified project"
+            detail="Source file does not belong to specified blueprint"
         )
     
     # Verify file type
@@ -334,7 +334,7 @@ async def deconstruct_specification(
             unit_file_id = str(uuid.uuid4())
             unit_file = DBFile(
                 file_id=unit_file_id,
-                project_id=source_file.project_id,
+                blueprint_id=source_file.blueprint_id,
                 filename=unit_filename,
                 content=unit_markdown,
                 file_type='unit',
@@ -346,7 +346,7 @@ async def deconstruct_specification(
             dafny_file_id = str(uuid.uuid4())
             dafny_file = DBFile(
                 file_id=dafny_file_id,
-                project_id=source_file.project_id,
+                blueprint_id=source_file.blueprint_id,
                 filename=dafny_filename,
                 content=dafny_code,
                 file_type='dfy',

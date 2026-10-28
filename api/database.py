@@ -8,8 +8,9 @@ from sqlalchemy import (
     ForeignKey, Enum, func, Boolean
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, sessionmaker, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, relationship
 from datetime import datetime
+from typing import Optional
 import os
 import hashlib
 import uuid
@@ -25,42 +26,42 @@ class User(Base):
     """
     __tablename__ = 'users'
     
-    user_id = Column(
+    user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
     )
-    github_id = Column(Integer, nullable=False)
-    github_login = Column(String(255), nullable=False)
-    email = Column(String(255), nullable=True)
-    avatar_url = Column(String(512), nullable=True)
+    github_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    github_login: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     
     # Encrypted GitHub OAuth tokens
-    access_token_encrypted = Column(Text, nullable=False)
-    refresh_token_encrypted = Column(Text, nullable=True)
-    token_expires_at = Column(DateTime, nullable=True)
+    access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     
     # User tier and rate limiting
-    tier: Column[str] = Column(
+    tier: Mapped[str] = mapped_column(
         Enum('free', 'pro', 'team', name='user_tier_enum'),
         nullable=False,
         default='free'
     )
-    verification_credits = Column(Integer, nullable=False, default=10)
+    verification_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     
     # Timestamps
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=datetime.utcnow,
         onupdate=datetime.utcnow
     )
-    last_login_at = Column(DateTime, nullable=True)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     
     # Relationships
-    projects = relationship(
-        "Project",
+    blueprints = relationship(
+        "Blueprint",
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True
@@ -78,32 +79,55 @@ class User(Base):
     )
 
 
-class Project(Base):
+
+class Blueprint(Base):
     """
-    Represents a project grouping multiple files.
-    Projects can be owned by users (authenticated) or API keys (anonymous/legacy).
+    Represents a blueprint (formerly project) grouping multiple files.
+    Blueprints are backed by a GitHub repository and the Trusted Kernel Architecture.
     """
-    __tablename__ = 'projects'
+    __tablename__ = 'blueprints'
     
-    project_id = Column(
+    blueprint_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
     )
-    name = Column(String(255), nullable=False)
-    description = Column(Text, nullable=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # GitHub Integration
+    repository_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    repository_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    repository_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    installation_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    default_branch: Mapped[str] = mapped_column(String(255), nullable=False, default='main')
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Brain Architecture - Component Tracking
+    component_uuid: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)  # UUID for component tracking
+    registry_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)  # Path in .inspecthor/registry.yaml
+
+    # Synchronization State (for AI-Gapped Development)
+    sync_status: Mapped[str] = mapped_column(
+        Enum('clean', 'dirty', 'verifying', 'error', name='sync_status_enum'),
+        nullable=False,
+        default='clean'
+    )
+    spec_hash: Mapped[Optional[str]] = mapped_column(String(71), nullable=True)  # SHA256 hash of spec.md (sha256:...)
+    dafny_hash: Mapped[Optional[str]] = mapped_column(String(71), nullable=True)  # SHA256 hash of core.dfy
+    last_harmonized: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # Last harmonization timestamp
+
     # Owner can be either a user or an API key (for backward compatibility)
-    user_id = Column(
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('users.user_id', ondelete='CASCADE'),
         nullable=True,
         index=True
     )
-    api_key_hash = Column(String(64), nullable=True, index=True)
+    api_key_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=datetime.utcnow,
@@ -111,10 +135,10 @@ class Project(Base):
     )
     
     # Relationships
-    user = relationship("User", back_populates="projects")
+    user = relationship("User", back_populates="blueprints")
     files = relationship(
         "File",
-        back_populates="project",
+        back_populates="blueprint",
         cascade="all, delete-orphan",
         passive_deletes=True
     )
@@ -123,7 +147,7 @@ class Project(Base):
     __table_args__ = (
         # Unique constraint: name is unique per user
         Index(
-            'ix_projects_user_id_name_lower',
+            'ix_blueprints_user_id_name_lower',
             user_id,
             func.lower(name),
             unique=True,
@@ -131,15 +155,18 @@ class Project(Base):
         ),
         # Unique constraint: name is unique per API key (legacy)
         Index(
-            'ix_projects_api_key_hash_name_lower',
+            'ix_blueprints_api_key_hash_name_lower',
             api_key_hash,
             func.lower(name),
             unique=True,
             postgresql_where=Column('api_key_hash').isnot(None)
         ),
         # Index for sorting by updated_at
-        Index('ix_projects_updated_at', updated_at.desc()),
+        Index('ix_blueprints_updated_at', updated_at.desc()),
+        # Index for repository URL lookups
+        Index('ix_blueprints_repository_url', repository_url),
     )
+
 
 
 class File(Base):
@@ -149,28 +176,29 @@ class File(Base):
     """
     __tablename__ = 'files'
     
-    file_id = Column(
+    file_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
     )
-    project_id = Column(
+    blueprint_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey('projects.project_id', ondelete='CASCADE'),
+        ForeignKey('blueprints.blueprint_id', ondelete='CASCADE'),
         nullable=False,
         index=True
     )
-    filename = Column(String(255), nullable=False)
-    content = Column(Text, nullable=False)
-    file_type: Column[str] = Column(
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    file_type: Mapped[str] = mapped_column(
         Enum('md', 'dfy', 'unit', name='file_type_enum'),
         nullable=False
     )
-    renamed = Column(Boolean, nullable=False, default=False)  # Track if file was manually renamed
-    file_metadata = Column(Text, nullable=True)  # JSON metadata (traceability, statistics, etc.)
-    size_bytes = Column(Integer, nullable=True)  # File size in bytes
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
+    renamed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # Track if file was manually renamed
+    parent_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)  # Component directory (None = blueprint root)
+    file_metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON metadata (traceability, statistics, etc.)
+    size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # File size in bytes
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=datetime.utcnow,
@@ -178,7 +206,7 @@ class File(Base):
     )
     
     # Relationships
-    project = relationship("Project", back_populates="files")
+    blueprint = relationship("Blueprint", back_populates="files")
     
     # Unit links relationships
     unit_links_as_root = relationship(
@@ -216,7 +244,7 @@ class File(Base):
     
     # Unique constraint: filename is unique per project
     __table_args__ = (
-        Index('ix_files_project_id_filename', project_id, filename, unique=True),
+        Index('ix_files_blueprint_id_filename', blueprint_id, filename, unique=True),
     )
 
 
@@ -227,24 +255,24 @@ class SpecDafnyLink(Base):
     """
     __tablename__ = 'spec_dafny_links'
     
-    link_id = Column(
+    link_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
     )
-    spec_file_id = Column(
+    spec_file_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('files.file_id', ondelete='CASCADE'),
         nullable=False,
         index=True
     )
-    dafny_file_id = Column(
+    dafny_file_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('files.file_id', ondelete='CASCADE'),
         nullable=False,
         index=True
     )
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     
     # Relationships
     spec_file = relationship("File", foreign_keys=[spec_file_id], back_populates="spec_dafny_links_as_spec")
@@ -258,35 +286,35 @@ class UnitLink(Base):
     """
     __tablename__ = 'unit_links'
     
-    link_id = Column(
+    link_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
     )
-    root_file_id = Column(
+    root_file_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('files.file_id', ondelete='CASCADE'),
         nullable=False
     )
-    unit_file_id = Column(
+    unit_file_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('files.file_id', ondelete='CASCADE'),
         nullable=False
     )
-    dafny_file_id = Column(
+    dafny_file_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('files.file_id', ondelete='CASCADE'),
         nullable=False
     )
-    start_line = Column(Integer, nullable=False)
-    end_line = Column(Integer, nullable=False)
-    title = Column(String(255), nullable=True)
-    verification_status: Column[str] = Column(
+    start_line: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_line: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    verification_status: Mapped[str] = mapped_column(
         Enum('unknown', 'verified', 'failed', 'pending', name='verification_status_enum'),
         nullable=False,
         default='unknown'
     )
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     
     # Relationships
     root_file = relationship("File", foreign_keys=[root_file_id], back_populates="unit_links_as_root")
@@ -301,28 +329,28 @@ class Installation(Base):
     """
     __tablename__ = 'installations'
     
-    installation_id = Column(
+    installation_id: Mapped[int] = mapped_column(
         Integer,
         primary_key=True  # GitHub's installation ID
     )
-    user_id = Column(
+    user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('users.user_id', ondelete='CASCADE'),
         nullable=False
     )
     
     # GitHub metadata
-    account_login = Column(String(255), nullable=False)  # GitHub username/org
-    account_type = Column(String(50), nullable=False)  # "User" or "Organization"
-    account_id = Column(Integer, nullable=False)
+    account_login: Mapped[str] = mapped_column(String(255), nullable=False)  # GitHub username/org
+    account_type: Mapped[str] = mapped_column(String(50), nullable=False)  # "User" or "Organization"
+    account_id: Mapped[int] = mapped_column(Integer, nullable=False)
     
     # Installation status
-    suspended_at = Column(DateTime, nullable=True)
-    is_active = Column(Boolean, nullable=False, default=True)
+    suspended_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     
     # Timestamps
-    installed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
+    installed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=datetime.utcnow,
@@ -351,46 +379,46 @@ class Repository(Base):
     """
     __tablename__ = 'repositories'
     
-    repository_id = Column(
+    repository_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
     )
     
     # GitHub metadata
-    github_repo_id = Column(Integer, nullable=False)
-    installation_id = Column(
+    github_repo_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    installation_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey('installations.installation_id', ondelete='CASCADE'),
         nullable=False
     )
     
-    owner = Column(String(255), nullable=False)
-    name = Column(String(255), nullable=False)
-    full_name = Column(String(512), nullable=False)  # "owner/repo"
-    default_branch = Column(String(255), nullable=False, default='main')
+    owner: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(512), nullable=False)  # "owner/repo"
+    default_branch: Mapped[str] = mapped_column(String(255), nullable=False, default='main')
     
-    # InSpecThor project link
-    project_id = Column(
+    # InSpecThor blueprint link
+    blueprint_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey('projects.project_id', ondelete='SET NULL'),
+        ForeignKey('blueprints.blueprint_id', ondelete='SET NULL'),
         nullable=True
     )
     
     # Sync status
-    last_synced_at = Column(DateTime, nullable=True)
-    sync_status: Column[str] = Column(
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    sync_status: Mapped[str] = mapped_column(
         Enum('never', 'syncing', 'synced', 'error', name='sync_status_enum'),
         nullable=False,
         default='never'
     )
     
     # Configuration
-    config_json = Column(Text, nullable=True)  # .inspecthor.json contents
+    config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # .inspecthor.json contents
     
     # Timestamps
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=datetime.utcnow,
@@ -399,7 +427,7 @@ class Repository(Base):
     
     # Relationships
     installation = relationship("Installation", back_populates="repositories")
-    project = relationship("Project")
+    blueprint = relationship("Blueprint")
     anchors = relationship(
         "Anchor",
         back_populates="repository",
@@ -421,55 +449,55 @@ class Anchor(Base):
     """
     __tablename__ = 'anchors'
     
-    anchor_id = Column(
+    anchor_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
     )
     
-    # Project link
-    project_id = Column(
+    # Blueprint link
+    blueprint_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey('projects.project_id', ondelete='CASCADE'),
+        ForeignKey('blueprints.blueprint_id', ondelete='CASCADE'),
         nullable=False
     )
     
     # Repository link (if GitHub-linked)
-    repository_id = Column(
+    repository_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('repositories.repository_id', ondelete='CASCADE'),
         nullable=True
     )
     
     # Location in code
-    file_path = Column(String(512), nullable=False)  # "src/auth/token.py"
-    function_name = Column(String(255), nullable=False)
-    start_line = Column(Integer, nullable=False)
-    end_line = Column(Integer, nullable=False)
+    file_path: Mapped[str] = mapped_column(String(512), nullable=False)  # "src/auth/token.py"
+    function_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    start_line: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_line: Mapped[int] = mapped_column(Integer, nullable=False)
     
     # Binding to specification
-    spec_id = Column(String(255), nullable=False)  # "REQ-101"
-    contract_ref = Column(String(512), nullable=False)  # "specs/auth.dfy::ValidateToken"
+    spec_id: Mapped[str] = mapped_column(String(255), nullable=False)  # "REQ-101"
+    contract_ref: Mapped[str] = mapped_column(String(512), nullable=False)  # "specs/auth.dfy::ValidateToken"
     
     # Verification status
-    last_verified_at = Column(DateTime, nullable=True)
-    verification_status: Column[str] = Column(
+    last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    verification_status: Mapped[str] = mapped_column(
         Enum('unknown', 'verified', 'failed', 'pending', name='anchor_status_enum'),
         nullable=False,
         default='unknown'
     )
-    proof_receipt_hash = Column(String(64), nullable=True)
+    proof_receipt_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     
     # Metadata
-    language: Column[str] = Column(
+    language: Mapped[str] = mapped_column(
         Enum('python', 'typescript', 'javascript', name='anchor_language_enum'),
         nullable=False
     )
-    auto_detected = Column(Boolean, nullable=False, default=False)
+    auto_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     
     # Timestamps
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=datetime.utcnow,
@@ -477,7 +505,7 @@ class Anchor(Base):
     )
     
     # Relationships
-    project = relationship("Project")
+    blueprint = relationship("Blueprint")
     repository = relationship("Repository", back_populates="anchors")
     proof_receipts = relationship(
         "ProofReceipt",
@@ -487,7 +515,7 @@ class Anchor(Base):
     )
     
     __table_args__ = (
-        Index('ix_anchors_project_id', project_id),
+        Index('ix_anchors_blueprint_id', blueprint_id),
         Index('ix_anchors_repository_id', repository_id),
         Index('ix_anchors_spec_id', spec_id),
         Index('ix_anchors_verification_status', verification_status),
@@ -501,49 +529,49 @@ class ProofReceipt(Base):
     """
     __tablename__ = 'proof_receipts'
     
-    receipt_id = Column(
+    receipt_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
     )
     
     # Anchor link
-    anchor_id = Column(
+    anchor_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('anchors.anchor_id', ondelete='CASCADE'),
         nullable=False
     )
     
     # Content hashes for cache invalidation
-    content_hash = Column(String(64), nullable=False)  # SHA-256 of execution slice
-    contract_hash = Column(String(64), nullable=False)  # SHA-256 of Dafny contract
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA-256 of execution slice
+    contract_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA-256 of Dafny contract
     
     # Verification result
-    status: Column[str] = Column(
+    status: Mapped[str] = mapped_column(
         Enum('verified', 'failed', name='receipt_status_enum'),
         nullable=False
     )
-    dafny_output = Column(Text, nullable=False)  # Full verifier output
-    counterexample = Column(Text, nullable=True)  # JSON if failed
+    dafny_output: Mapped[str] = mapped_column(Text, nullable=False)  # Full verifier output
+    counterexample: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON if failed
     
     # Provenance
-    verified_by: Column[str] = Column(
+    verified_by: Mapped[str] = mapped_column(
         Enum('ide', 'webhook', 'manual', name='verified_by_enum'),
         nullable=False
     )
-    user_id = Column(
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('users.user_id', ondelete='SET NULL'),
         nullable=True
     )
-    commit_sha = Column(String(40), nullable=True)  # Git commit SHA if webhook
+    commit_sha: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)  # Git commit SHA if webhook
     
     # Timing
-    verification_time_ms = Column(Integer, nullable=False)
+    verification_time_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     
     # Timestamps
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    expires_at = Column(DateTime, nullable=False)  # Auto-expire old receipts
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)  # Auto-expire old receipts
     
     # Relationships
     anchor = relationship("Anchor", back_populates="proof_receipts")
@@ -554,6 +582,58 @@ class ProofReceipt(Base):
         Index('ix_receipts_content_contract_hash', content_hash, contract_hash),
         Index('ix_receipts_status', status),
         Index('ix_receipts_expires_at', expires_at),
+    )
+
+
+class LedgerEntry(Base):
+    """
+    Represents a verification entry in the proof ledger.
+    Stores verification history for components in the database
+    (in addition to file-based storage in .inspecthor/proof_ledger/).
+    """
+    __tablename__ = 'ledger_entries'
+
+    entry_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+
+    # Component link
+    component_uuid: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    blueprint_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('blueprints.blueprint_id', ondelete='CASCADE'),
+        nullable=True,
+        index=True
+    )
+
+    # Verification data
+    code_hash: Mapped[str] = mapped_column(String(71), nullable=False)  # sha256:...
+    status: Mapped[str] = mapped_column(
+        Enum('verified', 'failed', 'pending', 'timeout', 'error', name='ledger_status_enum'),
+        nullable=False
+    )
+    proof_obligations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+    dafny_output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Metadata
+    dafny_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    verification_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # Relationships
+    blueprint = relationship("Blueprint")
+
+    __table_args__ = (
+        Index('ix_ledger_component_uuid', component_uuid),
+        Index('ix_ledger_blueprint_id', blueprint_id),
+        Index('ix_ledger_status', status),
+        Index('ix_ledger_created_at', created_at.desc()),
+        Index('ix_ledger_component_created', component_uuid, created_at.desc()),
     )
 
 
