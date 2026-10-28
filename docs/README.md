@@ -1,8 +1,8 @@
-# Guardian Gateway Documentation
+# Inspecthor Documentation
 
 ## Overview
 
-Guardian Gateway is a backend API service for formal specification verification. It transforms English requirements into verified Dafny specifications using Google Gemini AI.
+Inspecthor (the Guardian Gateway architecture) is the backend for Proof-Driven Development. It turns English requirements into Dafny contracts using Google Gemini, and verifies implementations against them with Dafny and Z3. The IDE is in [inspecthor-ide-frontend](https://github.com/asaf-avron/inspecthor-ide-frontend).
 
 ---
 
@@ -39,35 +39,23 @@ The `architecture/` subfolder has been consolidated into `ARCHITECTURE.md`. Cont
 - Production vision (Three Pillars)
 - Specification template appendix
 
-### Development & Integration
-- **[development/](development/)** - Development guides and integration docs
-  - `UI_API_MAPPING.md` - UI functionality to API mapping
-  - `UI_BACKEND_INTEGRATION_PLAN.md` - UI/backend integration plan
-
 ### Instructions & Setup
-- **[instructions/](instructions/)** - Setup and workflow instructions
-  - `Cursor_Build_Lens.md` - Cursor build lens guide
-  - `Cursor_Workflow.md` - Cursor workflow guide
-  - `Spec_Process_Guide.md` - Specification process guide
-  - `GITHUB_APP_SETUP.md` - GitHub app setup
-  - `GITHUB_APP_LOCALHOST_SETUP.md` - GitHub app localhost setup
+- **[instructions/](instructions/)** - Setup instructions
+  - [`GITHUB_APP_SETUP.md`](instructions/GITHUB_APP_SETUP.md) - GitHub App setup
+  - [`GITHUB_APP_LOCALHOST_SETUP.md`](instructions/GITHUB_APP_LOCALHOST_SETUP.md) - GitHub App setup for localhost
 
 ### Specifications (Implementation Specs)
-- **[specs/](specs/)** - Feature specifications for NASA-grade pivot
-  - **`Spec_Steel_Thread_Master.md`** - **MASTER SPEC** - Takes precedence over all others
-  - `Spec_Blueprint_Nomenclature_Refactor.md` - Phase 1: Project→Blueprint rename
-  - `Spec_Verification_Condition_Generator.md` - Phase 2: Deterministic VC generation
-  - `Spec_Trust_Registry.md` - Phase 3: Immutable proof ledger
-  - `Spec_Architects_Canvas_UI.md` - Phase 2-3: Split-view Blueprint/Proof UI
-  - `Spec_Dafny_Domain_Preludes.md` - Phase 2: Banking/Healthcare/Auth modules
-- **[specs/dev/](specs/dev/)** - Legacy development specifications
-  - `Dev_Spec_Deconstruct_To_Units.md` - Unit deconstruction spec
-  - `Dev_Spec_File_Operations.md` - File operations spec
-  - `Dev_Spec_Project_Management.md` - Project management spec
+- **[specs/](specs/)** - Feature specifications for the roadmap
+  - **[`Spec_Steel_Thread_Master.md`](specs/Spec_Steel_Thread_Master.md)** - **MASTER SPEC** - Takes precedence over all others
+  - [`Spec_Blueprint_Nomenclature_Refactor.md`](specs/Spec_Blueprint_Nomenclature_Refactor.md) - Phase 1: Project→Blueprint rename
+  - [`Spec_Verification_Condition_Generator.md`](specs/Spec_Verification_Condition_Generator.md) - Phase 2: Deterministic VC generation
+  - [`Spec_Trust_Registry.md`](specs/Spec_Trust_Registry.md) - Phase 3: Immutable proof ledger
+  - [`Spec_Architects_Canvas_UI.md`](specs/Spec_Architects_Canvas_UI.md) - Phase 2-3: Split-view Blueprint/Proof UI
+  - [`Spec_Dafny_Domain_Preludes.md`](specs/Spec_Dafny_Domain_Preludes.md) - Phase 2: Banking/Healthcare/Auth modules
 
 ### Reference Materials
 - **[knowledge/](knowledge/)** - Reference materials
-  - `dafny_ref.md` - Dafny reference
+  - [`dafny_ref.md`](knowledge/dafny_ref.md) - Dafny reference
 
 ---
 
@@ -75,14 +63,14 @@ The `architecture/` subfolder has been consolidated into `ARCHITECTURE.md`. Cont
 
 ### For Developers
 - [Formally Verified Components](formally-verified/) - Dafny-verified specifications
-- [API Endpoints](ARCHITECTURE.md#api-contracts) - API documentation
+- [API Endpoints](ARCHITECTURE.md#api-layer) - API documentation
 - [Security Setup](SECURITY.md#api-authentication) - Authentication and security
-- [Local Development](../README.md#quick-start-recommended) - Setup guide
+- [Local Development](../README.md#quickstart) - Setup guide
 
 ### For Deployment
 - [Production Checklist](SECURITY.md#production-deployment-checklist) - Deployment guide
 - [Environment Variables](SECURITY.md#environment-variables) - Configuration
-- [Docker Setup](../README.md#quick-start-docker) - Docker deployment
+- [Docker Setup](../README.md#2-run) - Docker deployment
 
 ## Core Modules (Not Formally Verified)
 

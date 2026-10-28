@@ -9,8 +9,8 @@
 
 InspecThor (formerly Guardian Gateway) is a formal verification IDE that transforms English requirements into verified Dafny specifications. The system is split into two services:
 
-- **Backend**: `inspecthor-ide-backend` - Python FastAPI server with core verification logic
-- **Frontend**: `inspecthor-ide-frontend` - Next.js web application with modern IDE interface
+- **Backend**: [`inspecthor-ide-backend`](https://github.com/asaf-avron/inspecthor-ide-backend) - Python FastAPI server with core verification logic
+- **Frontend**: [`inspecthor-ide-frontend`](https://github.com/asaf-avron/inspecthor-ide-frontend) - Next.js web application with modern IDE interface
 
 ```mermaid
 graph TB
@@ -138,10 +138,10 @@ Only signed, verified artifacts reach production.
 ## 7. Technology Stack
 
 ### Backend
-- **Framework:** FastAPI (Python 3.11+)
+- **Framework:** FastAPI (Python 3.13 in Docker)
 - **AI:** Google Gemini API
 - **Verification:** Dafny CLI with Z3 solver
-- **Database:** PostgreSQL with SQLAlchemy ORM
+- **Database:** SQLite by default, PostgreSQL optional, with SQLAlchemy ORM
 - **Server:** Uvicorn (ASGI)
 
 ### Frontend
@@ -154,9 +154,7 @@ Only signed, verified artifacts reach production.
 
 ## 8. Gap Analysis Reference
 
-For detailed gap analysis and tactical roadmap for NASA-grade pivot, see:
-
-📄 **[Gap Analysis & Tactical Roadmap](../../.gemini/antigravity/brain/1de79347-e311-4c70-9ea5-73e01d80cbae/gap_analysis_roadmap.md)**
+For the tactical roadmap, see the [master spec](specs/Spec_Steel_Thread_Master.md) and the [README roadmap](../README.md#roadmap).
 
 Key findings:
 - 49+ files use "Project" nomenclature (should be "Blueprint")
