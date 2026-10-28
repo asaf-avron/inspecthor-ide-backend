@@ -63,9 +63,10 @@ uvicorn api.main:app --reload --port 8000
 
 The API uses SQLite by default (PostgreSQL optional) with the following main tables:
 
-- **projects**: Project metadata (UUID primary key, owned by API key hash)
-- **files**: Files belonging to projects (UUID primary key, foreign key to projects)
+- **blueprints**: Blueprint metadata (UUID primary key, owned by a user or API key hash, optional GitHub repository, sync status and hashes)
+- **files**: Files belonging to blueprints (UUID primary key, foreign key to blueprints, optional `parent_path` for component files)
 - **unit_links**: Links between root files, unit files, and Dafny files (for deconstruction feature)
+- **ledger_entries**: Verification history per component (code hash, status, proof obligations)
 
 All tables use UUID primary keys and cascade deletes for data integrity.
 
