@@ -4,7 +4,7 @@
 
 ### Overview
 
-Guardian Gateway uses API key authentication to secure communication between the frontend and backend. This is a simple but effective approach for service-to-service authentication.
+Inspecthor uses API key authentication to secure communication between the frontend and backend. This is a simple but effective approach for service-to-service authentication.
 
 ### Setup
 
@@ -27,7 +27,7 @@ ALLOWED_API_KEYS=key1,key2,key3
 
 1. Add API key to frontend `.env.local`:
 ```bash
-GUARDIAN_API_KEY=key1
+INSPECTHOR_API_KEY=key1
 ```
 
 2. The API client automatically includes the key in request headers.
@@ -146,7 +146,7 @@ RATE_LIMIT_PER_MINUTE=60
 ```bash
 # Required
 NEXT_PUBLIC_API_URL=http://localhost:8000
-GUARDIAN_API_KEY=<secret>
+INSPECTHOR_API_KEY=<secret>
 ```
 
 ### Deployment
@@ -154,7 +154,7 @@ GUARDIAN_API_KEY=<secret>
 **Vercel (Frontend)**:
 ```bash
 vercel env add NEXT_PUBLIC_API_URL
-vercel env add GUARDIAN_API_KEY
+vercel env add INSPECTHOR_API_KEY
 ```
 
 **Railway (Backend)**:
@@ -201,7 +201,7 @@ All API requests are logged for security monitoring and debugging.
 ### Frontend
 
 - [ ] Set `NEXT_PUBLIC_API_URL` to production backend
-- [ ] Set `GUARDIAN_API_KEY` matching backend
+- [ ] Set `INSPECTHOR_API_KEY` matching backend
 - [ ] Enable HTTPS (automatic on Vercel)
 - [ ] Test API calls to backend
 - [ ] Verify no CORS errors in browser console

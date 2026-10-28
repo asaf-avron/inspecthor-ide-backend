@@ -1,4 +1,4 @@
-// Guardian Gateway: Immutable Contract
+// Inspecthor: Immutable Contract
 // Feature: Rewards System (P2P Transfer)
 
 // 1. The Logic Model (State)

@@ -1,5 +1,5 @@
 """
-Security module for Guardian Gateway.
+Security module for Inspecthor.
 Contains pure cryptographic functions following the Functional Core pattern.
 """
 

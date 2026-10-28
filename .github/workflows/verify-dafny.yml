@@ -35,7 +35,7 @@ jobs:
           file: ./verifier/Dockerfile
           load: true
           push: false
-          tags: guardian-verifier:latest
+          tags: inspecthor-verifier:latest
           cache-from: |
             type=gha,scope=verifier-global
             type=gha,scope=verifier-${{ github.ref }}
@@ -50,7 +50,7 @@ jobs:
           docker run -d --name verifier \
             -p 8001:8001 \
             --tmpfs /tmp:size=100M \
-            guardian-verifier:latest
+            inspecthor-verifier:latest
           
           # Wait for service to be ready
           echo "Waiting for verifier service to start..."

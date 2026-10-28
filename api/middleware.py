@@ -1,5 +1,5 @@
 """
-API Security Middleware for Guardian Gateway
+API Security Middleware for Inspecthor
 Provides authentication, rate limiting, and request logging
 """
 

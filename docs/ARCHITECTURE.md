@@ -7,7 +7,7 @@
 
 ## 1. System Overview
 
-InspecThor (formerly Guardian Gateway) is a formal verification IDE that transforms English requirements into verified Dafny specifications. The system is split into two services:
+Inspecthor is a formal verification IDE that transforms English requirements into verified Dafny specifications. The system is split into two services:
 
 - **Backend**: [`inspecthor-ide-backend`](https://github.com/asaf-avron/inspecthor-ide-backend) - Python FastAPI server with core verification logic
 - **Frontend**: [`inspecthor-ide-frontend`](https://github.com/asaf-avron/inspecthor-ide-frontend) - Next.js web application with modern IDE interface
@@ -102,7 +102,7 @@ Key tables: `users`, `projects`, `files`, `spec_dafny_links`, `unit_links`, `anc
 
 1. **Phase 1 (Design):** Spec Auditor generates `interface.dfy`, system calculates SHA256 hash (Hash_A)
 2. **Phase 2 (Build):** Coder Agent writes `implementation.py`
-3. **Phase 3 (Verify):** Guardian re-calculates hash (Hash_B)
+3. **Phase 3 (Verify):** Inspecthor re-calculates hash (Hash_B)
    - If `Hash_A != Hash_B`: **SECURITY LOCKDOWN** - Agent tampered with contract
 
 ### Security Layers
@@ -122,7 +122,7 @@ Key tables: `users`, `projects`, `files`, `spec_dafny_links`, `unit_links`, `anc
 ### Three Pillars
 
 1. **Spec Studio** - Collaborative web dashboard for architects
-2. **Guardian Bot** - GitHub/GitLab CI/CD gatekeeper
+2. **Inspecthor Bot** - GitHub/GitLab CI/CD gatekeeper
 3. **Trust Registry** - Immutable ledger of verified deployments
 
 ### The Invisible Workflow

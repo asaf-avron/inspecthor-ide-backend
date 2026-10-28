@@ -1,5 +1,5 @@
 """
-Project management endpoints for Guardian Gateway
+Project management endpoints for Inspecthor
 Handles project CRUD operations with strict API key ownership isolation
 """
 

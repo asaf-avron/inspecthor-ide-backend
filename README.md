@@ -14,7 +14,7 @@
 [![Verify Dafny](https://github.com/asaf-avron/inspecthor-ide-backend/actions/workflows/verify-dafny.yml/badge.svg)](https://github.com/asaf-avron/inspecthor-ide-backend/actions/workflows/verify-dafny.yml)
 [![Quality Gate](https://github.com/asaf-avron/inspecthor-ide-backend/actions/workflows/quality_gate.yml/badge.svg)](https://github.com/asaf-avron/inspecthor-ide-backend/actions/workflows/quality_gate.yml)
 
-Inspecthor (the Guardian Gateway architecture) is a verification gateway for AI-written code. You describe the intended behavior in plain English. Inspecthor audits that description for gaps, turns it into a Dafny contract, and uses the Dafny verifier with the Z3 solver to prove that the implementation meets the contract. If the code doesn't meet the contract, it doesn't ship.
+Inspecthor is a verification gateway for AI-written code. You describe the intended behavior in plain English. Inspecthor audits that description for gaps, turns it into a Dafny contract, and uses the Dafny verifier with the Z3 solver to prove that the implementation meets the contract. If the code doesn't meet the contract, it doesn't ship.
 
 The aim is to bring the kind of assurance used in aerospace and other safety-critical work into an ordinary pull-request workflow.
 

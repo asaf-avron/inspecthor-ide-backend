@@ -1,4 +1,4 @@
-# Guardian Gateway - Core Workflow
+# Inspecthor - Core Workflow
 # State machine for the 4-stage specification workflow
 # Functional Core: No UI framework imports in core
 
@@ -120,9 +120,9 @@ Rules:
 - Empty or very short (<10 words) unclear text should be "junk"
 """
 
-STRUCTURE_PROMPT = """You are a specification formatter. Rewrite the following specification into the Guardian Standard Template format.
+STRUCTURE_PROMPT = """You are a specification formatter. Rewrite the following specification into the Inspecthor Standard Template format.
 
-## GUARDIAN STANDARD TEMPLATE:
+## INSPECTHOR STANDARD TEMPLATE:
 The output MUST contain these sections:
 
 ### Entities
@@ -153,7 +153,7 @@ For each operation/feature, include:
 
 class WorkflowManager:
     """
-    Manages the state machine for the Guardian specification workflow.
+    Manages the state machine for the Inspecthor specification workflow.
     
     Handles transitions between stages:
     1. Triage: Classify input as Spec/Code/Junk
@@ -285,7 +285,7 @@ def run_triage(text: str, api_key: Optional[str] = None) -> TriageResult:
 
 def run_structuring(text: str, api_key: Optional[str] = None) -> StructureResult:
     """
-    Stage 2: Normalize specification to Guardian Standard Template.
+    Stage 2: Normalize specification to Inspecthor Standard Template.
     
     Uses Gemini Pro for higher quality output with 15-second conceptual timeout goal.
     

@@ -1,5 +1,5 @@
 """
-Guardian Gateway Core Package
+Inspecthor Core Package
 Contains core verification and analysis modules
 """
 

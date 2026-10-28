@@ -2,7 +2,7 @@
 
 ## Overview
 
-Inspecthor (the Guardian Gateway architecture) is the backend for Proof-Driven Development. It turns English requirements into Dafny contracts using Google Gemini, and verifies implementations against them with Dafny and Z3. The IDE is in [inspecthor-ide-frontend](https://github.com/asaf-avron/inspecthor-ide-frontend).
+Inspecthor is the backend for Proof-Driven Development. It turns English requirements into Dafny contracts using Google Gemini, and verifies implementations against them with Dafny and Z3. The IDE is in [inspecthor-ide-frontend](https://github.com/asaf-avron/inspecthor-ide-frontend).
 
 ---
 
