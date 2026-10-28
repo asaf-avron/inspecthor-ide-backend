@@ -1,8 +1,8 @@
 #!/bin/bash
-# Guardian Gateway - Docker Development Script
+# Inspecthor - Docker Development Script
 # Starts all services (database, backend, frontend) with Docker Compose
 
-echo "🚀 Starting Guardian Gateway with Docker..."
+echo "🚀 Starting Inspecthor with Docker..."
 echo ""
 
 # Check if .env exists

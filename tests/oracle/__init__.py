@@ -1,3 +1,3 @@
 """
-Oracle test infrastructure for Guardian Gateway.
+Oracle test infrastructure for Inspecthor.
 """

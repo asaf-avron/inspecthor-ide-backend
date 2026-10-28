@@ -1,5 +1,5 @@
 """
-File management endpoints for Guardian Gateway
+File management endpoints for Inspecthor
 Handles saving, loading, listing, updating, and deleting specification files
 Files must belong to a project and ownership is verified through project ownership
 """

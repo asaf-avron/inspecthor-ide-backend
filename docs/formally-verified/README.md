@@ -1,6 +1,6 @@
 # Formally Verified Components
 
-This directory documents the **only components** in Guardian Gateway that have Dafny-verified formal specifications. All specifications are verified in CI (`.github/workflows/verify-dafny.yml`).
+This directory documents the **only components** in Inspecthor that have Dafny-verified formal specifications. All specifications are verified in CI (`.github/workflows/verify-dafny.yml`).
 
 ## Verified Specifications
 

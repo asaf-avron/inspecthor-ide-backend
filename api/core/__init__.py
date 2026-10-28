@@ -1,5 +1,5 @@
 """
-Functional Core module for Guardian Gateway.
+Functional Core module for Inspecthor.
 Contains pure Python logic matching Dafny Functional Core specifications.
 
 This module implements the "Functional Core / Imperative Shell" architecture:

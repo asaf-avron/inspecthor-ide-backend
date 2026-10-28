@@ -1,4 +1,4 @@
-# Guardian Gateway - Core Auditor
+# Inspecthor - Core Auditor
 # LLM-powered specification analysis using Google Gemini
 # Functional Core: No UI framework imports in core
 
