@@ -69,11 +69,15 @@ We invert the typical development pyramid. Instead of writing code then testing,
 | `/api/generate/refine-spec` | POST | Apply gap suggestions |
 | `/api/verify` | POST | Run Dafny verification |
 | `/api/files/*` | CRUD | File management |
-| `/api/projects/*` | CRUD | Project management |
+| `/api/blueprints/*` | CRUD | Blueprint management (formerly projects) |
+| `/api/brain/*` | Mixed | Component registry and proof ledger |
+| `/api/drift/*`, `/api/harmonize/*` | POST | Drift detection and spec/contract/code sync |
+| `/api/diagrams/*`, `/api/refinement/*`, `/api/runtime/*` | Mixed | Diagrams, complexity analysis, runtime verification |
+| `/api/iron-grip/*`, `/api/tka/*` | Mixed | Branch protection and repository bootstrap |
 
 ### Database Schema
 
-Key tables: `users`, `projects`, `files`, `spec_dafny_links`, `unit_links`, `anchors`, `proof_receipts`
+Key tables: `users`, `blueprints`, `files`, `spec_dafny_links`, `unit_links`, `anchors`, `proof_receipts`, `ledger_entries`
 
 ---
 

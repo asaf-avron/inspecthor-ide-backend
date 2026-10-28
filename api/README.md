@@ -29,16 +29,17 @@ uvicorn api.main:app --reload --port 8000
 ### Health Check
 - `GET /api/health` - Check API and service status
 
-### Project Management
-- `POST /api/projects` - Create a new project (bootstraps README.md)
-- `GET /api/projects` - List all projects (paginated, sortable)
-- `GET /api/projects/{project_id}` - Get single project details
-- `GET /api/projects/{project_id}/structure` - Get project + file tree (optimized, single RTT)
-- `PUT /api/projects/{project_id}` - Update project name/description
-- `DELETE /api/projects/{project_id}` - Delete project (cascades to files and unit_links)
+### Blueprint Management
+- `POST /api/blueprints` - Create a new blueprint (bootstraps README.md)
+- `GET /api/blueprints` - List all blueprints (paginated, sortable)
+- `GET /api/blueprints/{blueprint_id}` - Get single blueprint details
+- `GET /api/blueprints/{blueprint_id}/structure` - Get blueprint + file tree (optimized, single RTT)
+- `PUT /api/blueprints/{blueprint_id}` - Update blueprint name/description
+- `DELETE /api/blueprints/{blueprint_id}` - Delete blueprint (cascades to files and unit_links)
+- `POST /api/blueprints/initialize` - Create a blueprint from a GitHub repository and scaffold it
 
 ### File Management
-- `POST /api/files/save` - Save a file (requires project_id)
+- `POST /api/files/save` - Save a file (requires blueprint_id)
 - `GET /api/files/{file_id}` - Get file by ID
 - `PUT /api/files/{file_id}` - Update file content (atomic)
 - `GET /api/files` - List files (filterable by project_id, file_type)
